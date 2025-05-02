@@ -323,24 +323,24 @@ class NFautoencoder(nets.Autoencoder):
     def __init__(self, save_num, states_dir, net, mix_precision = False, learning_rate = 0.001, description = '', verbose = 'epoch', transform = None, latent_transform = None, in_transform = None):
         super().__init__(save_num, states_dir, net, mix_precision, learning_rate, description, verbose, transform, latent_transform, in_transform)
         self.flowlossweight = 0.5
-        # self.separate_losses = {
-        #     'reconstruct': [],
-        #     'flow': [],
-        #     'latent': [],
-        #     'bound': [],
-        #     'kl': []
-        # }
+        self.separate_losses = {
+            'reconstruct': [],
+            'flow': [],
+            'latent': [],
+            'bound': [],
+            'kl': []
+        }
     
     def __getstate__(self) -> dict[str, Any]:
         return super().__getstate__() | {
             'flowlossweight': self.flowlossweight,
-            # 'separate_losses': self.separate_losses
+            'separate_losses': self.separate_losses
         }
     
     def __setstate__(self, state: dict[str, Any]) -> None:
         super().__setstate__(state)
         self.flowlossweight = state['flowlossweight']
-        # self.separate_losses = state['separate_losses']
+        self.separate_losses = state['separate_losses']
 
     def _loss(self, in_data: Tensor, target: Tensor) -> float:
         """
@@ -370,45 +370,65 @@ class NFautoencoder(nets.Autoencoder):
         if self.net.checkpoints:
             latent = self.net.checkpoints[-1].sample([1])[0]
 
-        loss = self.reconstruct_loss * self.reconstruct_func(output, in_data) 
+        # # loss = self.reconstruct_loss * self.reconstruct_func(output, in_data) 
         # separate_loss.append(self.reconstruct_loss * self.reconstruct_func(output, in_data))
         # self.separate_losses['reconstruct'].append(self.reconstruct_loss * self.reconstruct_func(output, in_data).clone().item())
 
-        loss -= self.flowlossweight * self.net.checkpoints[-1].log_prob(target).mean()
+        # # loss -= self.flowlossweight * self.net.checkpoints[-1].log_prob(target).mean()
         # separate_loss.append(self.flowlossweight * self.net.checkpoints[-1].log_prob(target).mean())
         # self.separate_losses['flow'].append(self.flowlossweight * self.net.checkpoints[-1].log_prob(target).mean().clone().item())
 
-        if self.latent_loss and latent is not None:
-            loss += self.latent_loss * self.latent_func(latent, target)
-            # separate_loss.append(self.latent_loss * self.latent_func(latent, target))
-            # self.separate_losses['latent'].append(self.latent_loss * self.latent_func(latent, target).clone().item())    
-        # else: 
-        #     losses.append(0)
+        # if self.latent_loss and latent is not None:
+        #     # loss += self.latent_loss * self.latent_func(latent, target)
+        #     separate_loss.append(self.latent_loss * self.latent_func(latent, target))
+        #     self.separate_losses['latent'].append(self.latent_loss * self.latent_func(latent, target).clone().item())    
+        # # else: 
+        # #     losses.append(0)
 
-        if self.bound_loss and latent is not None:
-            loss += self.bound_loss * torch.mean(torch.cat((
-                (bounds[0] - latent) ** 2 * (latent < bounds[0]),
-                (latent - bounds[1]) ** 2 * (latent > bounds[1]),
-            )))
-            # separate_loss.append(self.bound_loss * torch.mean(torch.cat((
-            #     (bounds[0] - latent) ** 2 * (latent < bounds[0]),
-            #     (latent - bounds[1]) ** 2 * (latent > bounds[1]),
-            # ))))
-            # self.separate_losses['bound'].append(self.bound_loss * torch.mean(torch.cat((
-            #     (bounds[0] - latent) ** 2 * (latent < bounds[0]),
-            #     (latent - bounds[1]) ** 2 * (latent > bounds[1]),
-            # ))).clone().item())
+        # if self.bound_loss and latent is not None:
+        #     # loss += self.bound_loss * torch.mean(torch.cat((
+        #     #     (bounds[0] - latent) ** 2 * (latent < bounds[0]),
+        #     #     (latent - bounds[1]) ** 2 * (latent > bounds[1]),
+        #     # )))
+        #     separate_loss.append(self.bound_loss * torch.mean(torch.cat((
+        #         (bounds[0] - latent) ** 2 * (latent < bounds[0]),
+        #         (latent - bounds[1]) ** 2 * (latent > bounds[1]),
+        #     ))))
+        #     self.separate_losses['bound'].append(self.bound_loss * torch.mean(torch.cat((
+        #         (bounds[0] - latent) ** 2 * (latent < bounds[0]),
+        #         (latent - bounds[1]) ** 2 * (latent > bounds[1]),
+        #     ))).clone().item())
 
-        if self.kl_loss:
-            loss += self.kl_loss * self.net.kl_loss
-            # separate_loss.append(self.kl_loss * self.net.kl_loss)
-            # self.separate_losses['kl'].append(self.kl_loss * self.net.kl_loss.clone().item())
+        # if self.kl_loss:
+        #     # loss += self.kl_loss * self.net.kl_loss
+        #     separate_loss.append(self.kl_loss * self.net.kl_loss)
+        #     self.separate_losses['kl'].append(self.kl_loss * self.net.kl_loss.clone().item())
 
         # loss = torch.sum(torch.stack(separate_loss))
-
+        
         # appends losses
         # if self._train_state:
         #     separate_loss = [loss_value.clone().item() for loss_value in separate_loss]
+
+        # New method (also doesn't work..):
+        loss_components = {
+            'reconstruct': self.reconstruct_loss * self.reconstruct_func(output, in_data),
+            'flow': self.flowlossweight * self.net.checkpoints[-1].log_prob(target).mean(),
+            'latent': self.latent_loss * self.latent_func(latent, target) if self.latent_loss and latent is not None else None,
+            'bound': self.bound_loss * torch.mean(torch.cat((
+                (bounds[0] - latent) ** 2 * (latent < bounds[0]),
+                (latent - bounds[1]) ** 2 * (latent > bounds[1]),
+            ))) if self.bound_loss and latent is not None else None,
+            'kl': self.kl_loss * self.net.kl_loss if self.kl_loss else None,
+        }
+
+        # Iterate through the dictionary to process each loss component
+        separate_loss = []
+        for key, loss_value in loss_components.items():
+            if loss_value is not None:  # Only process non-None losses
+                separate_loss.append(loss_value)
+                if self._train_state:
+                    self.separate_losses[key].append(loss_value.clone().item())
 
         # print("reconstruct: ", self.reconstruct_loss, '*', self.reconstruct_func(output, in_data),'=', self.reconstruct_loss*self.reconstruct_func(output, in_data))
         # print('latent: ', self.latent_loss, '*', self.latent_func(latent, target), '=', self.latent_loss*self.latent_func(latent, target))
