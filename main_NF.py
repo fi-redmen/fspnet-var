@@ -25,7 +25,7 @@ import matplotlib.pyplot as plt
 
 from VAE_plots import comparison_plot, recon_plot, post_pred_plot, latent_corner_plot, rec_2d_plot, param_pairs_plot
 from VAE_plots import performance_plot
-from misc_utils import sample
+from my_utils.misc_utils import sample
 
 plt.style.use(["science", "grid", 'no-latex'])
 
