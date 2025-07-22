@@ -1,21 +1,24 @@
 import numpy as np
 import pandas as pd
-from numpy import ndarray
-import matplotlib.pyplot as plt
-from matplotlib.figure import FigureBase
-from matplotlib.axes import Axes
-
-from astropy.io import fits
-
-from fspnet.utils.utils import legend_marker, subplot_grid
-from fspnet.utils.plots import _legend
-from fspnet.utils.preprocessing import _channel_kev
-
 import sciplots
-
-from xspec import *
+import xspec
 import torch
 import os
+
+from typing import Any
+from numpy import ndarray
+from astropy.io import fits
+
+import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
+from matplotlib.patches import Patch
+
+from chainconsumer import Chain, ChainConsumer, PlotConfig, ChainConfig, Truth
+
+from fspnet.utils.plots import plot_param_pairs, _plot_histogram
+
+from plot_utils import get_energies, xspec_reconstruction, decoder_reconstruction, quantile_limits
+from misc_utils import sample
 
 RECTANGLE: tuple[int, int] = (16, 9)
 MAJOR: int = 28
@@ -24,346 +27,202 @@ SCATTER_NUM: int = 1000
 HI_RES: tuple[int, int] = (32, 18)
 ERR_DIST: bool = False  # plot error in the distribution
 CAPSIZE: int = 2
+LOG_PARAMS: list[int] = [0, 2, 3, 4]  # parameters to be plotted in log scale
 PARAM_LIMS: ndarray = np.array([[5.0e-3,75],[1.3,4],[1.0e-3,1],[2.5e-2, 4],[1.0e-2, 1.0e+10]])
+PARAM_NAMES : ndarray = np.array(['$N_{H}$ $(10^{22}\ cm^{-2})$', '$\Gamma$', '$f_{sc}$','$kT_{disk}$ $(keV)$','$N$'])
+COLORS_LIST = ['#0C5DA5', '#00B945', '#FF9500', '#9159ab', '#00A7C6']
+SYNTHETIC_DIR: str = '/Users/astroai/Projects/FSPNet/data/synth_spectra_clean.pickle'
 
-def _create_bin(
-        x_data: ndarray,
-        clow: float,
-        chi: float,
-        nchan: int) -> tuple[ndarray, ndarray]:
+NAMES = ['js_ni0100320101_0mpu7_goddard_GTI0.jsgrp', 
+           'js_ni0103010102_0mpu7_goddard_GTI0.jsgrp',
+           'js_ni1014010102_0mpu7_goddard_GTI30.jsgrp',
+           'js_ni1050360115_0mpu7_goddard_GTI9.jsgrp',
+           'js_ni1100320119_0mpu7_goddard_GTI26.jsgrp']
+COLORS: dict = {
+    NAMES[0]: COLORS_LIST[0],
+    NAMES[1]: COLORS_LIST[1],
+    NAMES[2]: COLORS_LIST[2],
+    NAMES[3]: COLORS_LIST[3],
+    NAMES[4]: COLORS_LIST[4]
+}
+
+MIN_QUANT: dict = {
+    NAMES[0]: 0.005,
+    NAMES[1]: 0.005,
+    NAMES[2]: 0.0001,
+    NAMES[3]: 0.001,
+    NAMES[4]: 0.001
+}
+
+MAX_QUANT: dict = {
+    NAMES[0]: 0.995,
+    NAMES[1]: 0.995,
+    NAMES[2]: 0.9999,
+    NAMES[3]: 0.999,
+    NAMES[4]: 0.999
+}
+
+
+def performance_plot(
+        y_label: str,
+        loss_fns: dict,
+        log_y: bool = True,
+        plots_dir: str | None = None,
+        save_name: str | None = 'performance.png') -> None:
     """
-    Bins x & y data
-
-    Removes data of bad quality defined as 1 [Not yet implemented]
+    Plots training and validation performance as a function of epochs
 
     Parameters
     ----------
-    x_data : ndarray
-        x data that will be averaged per bin
-    y_data : ndarray
-        y data that will be summed per bin
-    clow : float
-        Lower limit of data that will be binned
-    chi : float
-        Upper limit of datat that will be binned
-    nchan : int
-        Number of channels per bin
-
-    Returns
-    -------
-    (ndarray, ndarray)
-        Binned (x, y) data
+    plots_dir : string
+        Directory to save plots
+    y_label : string
+        Performance metric
+    val : list[Any] | ndarray
+        Validation performance
+    log_y : boolean, default = True
+        If y-axis should be logged
+    plots_dir : str, default = None
+        Directory to save plots
+    train : list[Any] | ndarray, default = None
+        Training performance
     """
-    x_data = x_data[clow:chi]\
+    plt.figure(figsize=RECTANGLE, constrained_layout=True)
 
-    x_data = np.mean(x_data.reshape(-1, int(nchan)), axis=1)
+    text = ''
+    total_loss_fn = np.zeros(len(loss_fns['reconstruct']))
 
-    return x_data
+    # makes function positive so logging possible
+    move = abs(min([min(v) if v else 0 for k, v in loss_fns.items()]))+1
+    loss_fns['reconstruct'] = list(np.array(loss_fns['reconstruct'])+move)
+    loss_fns['latent'] = list(np.array(loss_fns['latent'])+move)
+    loss_fns['flow'] = list(np.array(loss_fns['flow'])+move)
+    loss_fns['bound'] = list(np.array(loss_fns['bound'])+move)
 
+    # plotting loss function components if they contribute, and adding to total loss
+    if loss_fns['reconstruct'] and np.array(loss_fns['reconstruct']).all()!=0:
+        plt.plot(loss_fns['reconstruct'], label='Reconstruction')
+        text+=f"Final recon: {loss_fns['reconstruct'][-1]:.3e} \n"
+        total_loss_fn += np.array(loss_fns['reconstruct'])
+    if loss_fns['flow']:
+        plt.plot(loss_fns['flow'], label='Flow')
+        text+=f"Final flow: {loss_fns['flow'][-1]:.3e} \n"
+        total_loss_fn += np.array(loss_fns['flow'])
+    if loss_fns['latent']:
+        plt.plot(loss_fns['latent'], label='Latent')
+        text+=f"Final latent: {loss_fns['latent'][-1]:.3e} \n"
+        total_loss_fn += np.array(loss_fns['latent'])
+    if loss_fns['bound']:
+        plt.plot(loss_fns['bound'], label='Bound')
+        text+=f"Final bound: {loss_fns['bound'][-1]:.3e} \n"
+        total_loss_fn += np.array(loss_fns['bound'])
+    if loss_fns['kl']:
+        plt.plot(loss_fns['kl'], label='KL')
+        text+=f"Final KL: {loss_fns['kl'][-1]:.3e} \n"
+        total_loss_fn += np.array(loss_fns['kl'])
 
-def _binning(x_data: ndarray, bins: ndarray) -> tuple[ndarray, ndarray, ndarray]:
-    """
-    Bins data to match binning performed in Xspec
+    plt.plot(total_loss_fn, label='Total Loss', color='k')
 
-    Parameters
-    ----------
-    x_data : ndarray
-        x data to be binned
-    y_data : ndarray
-        y data to be binned
-    bins : ndarray
-        Array of bin change index & bin size
+    # plt.plot(val, label='Validation ---')
+    plt.xticks(fontsize=MINOR)
+    plt.yticks(fontsize=MINOR)
+    plt.yticks(fontsize=MINOR, minor=True)
+    plt.xlabel('Epoch', fontsize=MINOR)
+    plt.ylabel(y_label, fontsize=MINOR)
+    plt.text(
+        0.75, 0.75,
+        text,
+        fontsize=MINOR,
+        transform=plt.gca().transAxes
+    )
 
-    Returns
-    -------
-    tuple[ndarray, ndarray, ndarray]
-        Binned x & y data & bin energy per data point
-    """
-    # Initialize variables
-    x_bin = np.array(())
+    plt.yscale('log')
 
-    # Bin data
-    for i in range(bins.shape[1] - 1):
-        x_new = _create_bin(x_data, bins[0, i], bins[0, i + 1], bins[1, i])
-        x_bin = np.append(x_bin, x_new)
-    
-    return x_bin
+    if all(np.all(np.array(loss) >= 0) for loss in loss_fns.values()):
+        plt.yscale('log')
 
-def _init_subplots(
-        subplots: str | tuple[int, int] | list | ndarray,
-        fig: FigureBase | None = None,
-        fig_size: tuple[int, int] = RECTANGLE,
-        **kwargs: any) -> tuple[dict[str, Axes] | ndarray[Axes], FigureBase]:
-    """
-    Generates subplots within a figure or sub-figure
+    plt.legend(fontsize=MAJOR)
 
-    Parameters
-    ----------
-    subplots : str | tuple[int, int] | list | ndarray
-        Parameters for subplots or subplot_mosaic
-    fig : FigureBase | None, default = None
-        FigureBase to add subplots to
-    fig_size : tuple[integer, integer]
-        Size of the figure, only used if fig is None
-
-    **kwargs
-        Optional kwargs to pass to subplots or subplot_mosaic
-
-    Returns
-    -------
-    tuple[dict[str, Axes] | ndarray[Axes], FigureBase]
-        Dictionary or array of subplot axes and figure
-    """
-    axes: dict[str, Axes] | ndarray[Axes]
-
-    if fig is None:
-        fig = plt.figure(constrained_layout=True, figsize=fig_size)
-
-    # Plots either subplot or mosaic
-    if isinstance(subplots, tuple):
-        axes = fig.subplots(*subplots, **kwargs)
-    else:
-        axes = fig.subplot_mosaic(subplots, **kwargs)
-
-    return axes, fig
-
-def make_margins(
-    axis: Axes,
-    x: tuple | ndarray | list,
-    y: tuple | ndarray | list,
-    x_margin: int = 0.05,
-    y_margin: int = 0.05,
-    log_plot: bool = False
-    ):
-
-    """
-    Sets x and y lims to give margins irrespective of error bars
-
-    Parameters
-    ----------
-    targs : dict
-        x values on plot - can have more dimensions for each set of data plotted
-    lats : dict
-        y values on plot - can have more dimensions for each set of data plotted
-    x_margin : int
-        Percentage of margin space vs. data on x scale
-    y_,argin : int
-        Percentafe of margin space vs. data on y scale
-    """
-
-    min_xy = np.min(np.array([x,y]))
-    max_xy = np.max(np.array([x,y]))
-
-    min_x = np.min(x)
-    min_y = np.min(y)
-
-    max_x = np.max(x)
-    max_y = np.max(y)
-
-    if log_plot:
-    #     x_inc = (10**(max(x)) - 10**(min(x))) * (10**x_margin)
-    #     y_inc = (10**(max(y)) - 10**(min(y))) * (10**y_margin)
-
-    #     low_x = np.log10(min(x)-x_inc)
-    #     high_x = np.log10(max(x)+x_inc)
-
-    #     low_y = np.log10(min_xy-y_inc)
-    #     high_y = np.log10(max_xy+y_inc)
-
-    #     axis.set_xlim(low_x, high_x)
-    #     axis.set_ylim(low_y, high_y)
-        # Calculate margin in linear space (not log space)
-
-        # Add margin to data range in linear space
-        x_inc = (max_x - min_x) * x_margin
-        y_inc = (max_y - min_y) * y_margin
-
-        # Set the limits to be larger than the data range
-        low_x = min_x - x_inc
-        high_x = max_x + x_inc
-        low_y = min_y - y_inc
-        high_y = max_y + y_inc
-
-        # Ensure that the limits are all positive for log scaling
-        low_x = max(low_x, 1e-10)  # Avoid log(0) or log(negative)
-        low_y = max(low_y, 1e-10)
-
-        # Apply log scaling 
-        axis.set_xscale('log')
-        axis.set_yscale('log')
-
-        # Set the limits in log space
-        axis.set_xlim([low_x, high_x])
-        axis.set_ylim([low_y, high_y])
-
-    else:
-        x_inc = (max_x - min_x) * x_margin
-        y_inc = (max_y - min_y) * y_margin
-
-        axis.set_xlim(min_x-x_inc, max_x+x_inc)
-        axis.set_ylim(min_xy-y_inc, max_xy+y_inc)
-
-
+    if plots_dir and save_name:
+        plt.savefig(f'{plots_dir}'+save_name)
 
 def comparison_plot(
-    targs: dict,
-    lats: dict,
-    param_names: str | list[str],
-    log_params: int | list[int],
-    dir_name: str,
-    save_name: str,
-    err: str = 'both', # 'none', 'sep', 'both' for no errors, errors on separate plot and errors as errpr bars separately
-    cut_err: bool = False,
-    lim_valrange = False
-    ):
-
-    """
-    Plots comparison between input and output parameters
-
-    Parameters
-    ----------
-    targs : dict
-        Target parameters
-    lats : dict
-        Target uncertainties
-    param_names : str | list[str]
-        Names of each parameter
-    log_params : list[int]
-        Defines which parameters are logged
-    dir_name : str
-        Name of the directory to save plot
-    save_name : str
-        File name to save plot
-    err : dict
-        Whether error should be plotted and whether it should be a separate plot
-    show : bool
-        Whether to show the plot before saving
-    cut_err: bool
-        Whether to cut out errors
-    lim_valrange: bool
-        Whether to change limits of plots based on the value range of the inputs
-    """
-
-    colours = np.array(['blue'] * SCATTER_NUM, dtype=object)
-
-    axes, fig = _init_subplots(subplot_grid(len(param_names)))
-
-    # add extra dimension if uncertainties arent included
-    # if err=='none':
-    #     targs = targs[:,None,:SCATTER_NUM]
-    # else:
-
-    targs = targs[:,:SCATTER_NUM]
-
-    lats = lats[:,:SCATTER_NUM]
-
-    # Highlight parameters that are maximally or minimally constrained
-    for target_param in targs:
-        colours[np.argwhere(
-            (target_param == np.max(target_param)) |
-            (target_param == np.min(target_param))
-        )] = 'red'
-
-    # Scatter plot for each parameter
-    # For with uncertainties
-    for i, (name, axis, targ, lat) in enumerate(zip(
-            param_names,
-            axes.values(),
-            # targs[1,:],
-            targs,
-            # lats[:,1,:],
-            lats)):
-    
-    #for without unceertainties
-    # for i, (name, axis, targ, lat) in enumerate(zip(
-    #         param_names,
-    #         axes.values(),
-    #         targs[:,0,:],
-    #         lats[:,0,:])):
-
-        # if i in log_params:     #conversion for log parameters
-        #     if no_prop==False:  # if no_prop is false, propagates errors
-        #         lat_err = (1/np.log(10)) * (lat_err/lat)
-        #         targ_err = (1/np.log(10)) * (targ_err/targ)
-
-        #     lat = np.log10(lat)
-        #     targ = np.log10(targ)
-
-        axis.set_xlabel('inputs', fontsize=MINOR)
-        axis.set_ylabel('outputs', fontsize=MINOR)
-        axis.set_title(name, fontsize=MAJOR)
-        if i in log_params:
-            axis.set_xscale('log')
-            axis.set_yscale('log')
-
-        # for plotting parameters
-        value_range = (np.min(targ), np.max(targ))
-        axis.scatter(targ, lat, color=colours, alpha=0.2)
-
-        axis.plot(value_range, value_range, color='k')
-        axis.tick_params(labelsize=MINOR)
-        plt.xticks(fontsize=MINOR)
-        plt.yticks(fontsize=MINOR)
-        axis.xaxis.get_offset_text().set_visible(False)
-        axis.yaxis.get_offset_text().set_size(MINOR)
-
-        if lim_valrange==True:
-            axis.set_xlim(min(value_range), max(value_range)) 
-            axis.set_ylim(min(value_range), max(value_range))
-        else:
-            if cut_err==True:   # makes margins irrespective of errors
-                make_margins(axis, x=targ, y=lat)
-            else:
-                axis.margins(0.05,0.05)
-
-    _legend(legend_marker(['blue', 'red'], ['Free', 'Pegged']), fig)
-
-    plt.savefig(dir_name+save_name, dpi=300)
-
-def comparison_plot_NF(
     data: dict,
-    param_names: str | list[str],
-    log_params: list[int],
-    decoder,
-    network,
     dir_name: str,
-    save_name: str,
     n_points: int = 100,
     num_specs: int = 3,
-    n_recons: int = 3,
-    param_limits: list = PARAM_LIMS
+    param_names: str | list[str]=PARAM_NAMES,
+    log_params: list[int]=LOG_PARAMS,
+    specific_data: dict | None = None, #to choose which specific spectrum to take, from a list of spectra names)
     ):
     '''
     Plots:
     1) a random 1000? points (in grey) corresponding to maximum of each parameter distribution
-    2) 5? sets of 10? points (in different colours) where each set of points is sampled from different sets of parameter distributions
+    2) num_specs points (in different colours) where each set of points is sampled from different sets of parameter distributions
     3) 1:1 relation
     '''
 
-    axes, fig = _init_subplots(subplot_grid(len(param_names)))
+    
+    if specific_data:
+        num_specs = np.min([len(specific_data['targets'].swapaxes(1,2).swapaxes(0,1)),5])
+        colors = COLORS
+
+    else:
+        num_specs = np.min([num_specs, 5])
+        colors = COLORS_LIST
+
+    fig, axes = plt.subplot_mosaic('aabbcc\ndddeee', figsize=(16,9))
+    fig.subplots_adjust(top=0.8, hspace=0.5, wspace=0.8, left=0.05, right=0.95)
+    
+    # Adjust the title position
+    fig.suptitle('Comparison Plot', fontsize=MAJOR, y=0.99)  # Move the title slightly higher
 
     # grey plot - data for the grey plots has 5 parameters which each have their own 1620 corresponding spectra (limited to SCATTER_NUM)
     grey_targs = data['targets'].swapaxes(0,1).swapaxes(1,2)[0][:,:SCATTER_NUM]
     grey_lats = data['latent'].swapaxes(0,1).swapaxes(1,2)[0][:,:SCATTER_NUM]
-    # loop through each set of parameters, plotting (with errorbars?) the outputs vs inputs for SCATTER_NUM points
+
+
+    # loop through each set of parameters, plotting the outputs vs inputs for SCATTER_NUM points
     for i, (targ, lat, axis) in enumerate(zip(grey_targs, grey_lats, axes.values())):
+        if i in log_params:
+            axis.set_xscale('log')
+            axis.set_yscale('log')
+
+        axis.set_xlabel('inputs', fontsize=MINOR)
+        axis.set_ylabel('outputs', fontsize=MINOR)
+        axis.set_title(param_names[i], fontsize=MAJOR)
+
+        axis.tick_params(labelsize=20)
 
         # for taking maximum from the distibution rather than frist sample
         # lat = [np.max(data['latent'].swapaxes(1,2).swapaxes(1,0)[i][j]) for j in range(0,SCATTER_NUM)]
+
+        axis.set_xlim(np.min(targ), np.max(targ))
+        axis.set_ylim(np.min(targ), np.max(targ))
+
+        axis.tick_params(axis='x', labelsize=20)
+        axis.tick_params(axis='y', labelsize=20)
         
         axis.plot([np.min(targ), np.max(targ)], [np.min(targ), np.max(targ)], color='k')
-        axis.scatter(x=targ, y=lat, linestyle='None', color='grey', alpha=0.3, s=2)
+        axis.scatter(x=targ, y=lat, linestyle='None', color='grey', alpha=0.3, s=3)
+
+    # fig.legend(fontsize=20)
+    
+    legend_elements = [Line2D([0], [0], color='grey', label='Single Sample', linestyle='None', marker='o', alpha=0.5, markersize=10)]
+
+    fig.legend(handles=list(legend_elements), bbox_to_anchor=(0.5, 0.95), fancybox=False, shadow=False,
+                                ncol=4, fontsize=20, handletextpad=0.4, columnspacing=0.4, loc='upper center')
+
     plt.savefig(dir_name+'NF_comparison_grey.png', dpi=300)
 
-    # multi-color plot
+    # adding more distributions corresponding to more spectra
+    # loop through each set of parameters, plotting, for 5? different spectra, their distributions from 10? data points
     multi_targs = data['targets'].swapaxes(1,2).swapaxes(0,1)
     multi_lats = data['latent'].swapaxes(1,2).swapaxes(0,1)
-    # loop through each set of parameters, plotting, for 5? different spectra, their distributions from 10? data points
-    for i, (targ, lat, axis) in enumerate(zip(multi_targs, multi_lats, axes.values())):
+    for i, (targ, lat, axis, grey_targ) in enumerate(zip(multi_targs, multi_lats, axes.values(), grey_targs)):
         # targ[spectrum number][value or error]
-
-        for spec_num in range(num_specs):
-            axis.errorbar(x=[targ[spec_num][0]]*n_points, xerr=[targ[spec_num][1]]*n_points, y=lat[spec_num][:n_points], linestyle='None', capsize=1, ms=7, alpha=0.05, marker='o')
+        # clear acis from single samples
+        axis.cla()
 
         if i in log_params:
             axis.set_xscale('log')
@@ -373,441 +232,491 @@ def comparison_plot_NF(
         axis.set_ylabel('outputs', fontsize=MINOR)
         axis.set_title(param_names[i], fontsize=MAJOR)
 
-    plt.savefig(dir_name+'NF_comparison.png', dpi=300)
+        axis.tick_params(labelsize=20)
 
-    # for each first num_spec spectra, we want to plot:
-    # param_distributions, with eg. 4 samples shown (and then change predicted dist to a dist from xspec)
-    # reconstructions for each spectra with each 10? samples plotted on the same graph (and then with compared to what xspec model predicts)
-    colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
+        # for taking maximum from the distibution rather than frist sample
+        # lat = [np.max(data['latent'].swapaxes(1,2).swapaxes(1,0)[i][j]) for j in range(0,SCATTER_NUM)]
 
-    # loop over mun_specs spectra
-    for spec_num in range(num_specs):
-        # fig, ax = plt.subplot_mosaic('aabbccdddddd\eeefffdddddd', layout='constrained', figsize=(16,9))
+        axis.set_xlim(np.min(grey_targ), np.max(grey_targ))
+        axis.set_ylim(np.min(grey_targ), np.max(grey_targ))
+
+        axis.tick_params(axis='x', labelsize=20)
+        axis.tick_params(axis='y', labelsize=20)
         
-        dist_targs = data['targets'][spec_num][0]
-        dist_targ_errs = data['targets'][spec_num][1]
-        dist_lats = data['latent'][spec_num].swapaxes(0,1)
+        axis.plot([np.min(grey_targ), np.max(grey_targ)], [np.min(grey_targ), np.max(grey_targ)], color='k')
 
-        # samples parameters for reconstruction
-        # finds 3? random indexes to index each parameter in latent space
-        indexes = np.random.randint(0, len(dist_lats[0]), size=3)
-        samples = [[dist_lats[param_num][indexes[sample_number]] for param_num in range(len(param_names))] for sample_number in range(n_recons)]
+        for spec_num in range(0,100):
+            axis.errorbar(x=[targ[spec_num][0]]*n_points, xerr=[targ[spec_num][1]]*n_points, y=lat[spec_num][:n_points], 
+                        linestyle='None', capsize=1, ms=5, alpha=0.01, marker='o', color='grey')
+    
+    legend_elements = [Line2D([0], [0], color='grey', label='Multiple Samples', linestyle='None', marker='o', alpha=0.5, markersize=10)]
 
-        # param_distributions, with eg. 4 samples shown (and then change predicted dist to a dist from xspec)
-        dist_plots = sciplots.PlotDistributions(data=dist_lats, log=log_params, density=True, norm=True, titles=param_names, bins=200, colours=[colors[spec_num]]*5)
+    fig.legend(handles=list(legend_elements), bbox_to_anchor=(0.5, 0.95), fancybox=False, shadow=False,
+                                ncol=4, fontsize=20, handletextpad=0.4, columnspacing=0.4, loc='upper center')
+    
+    plt.savefig(dir_name+'NF_comparison_greyextra.png', dpi=300)
 
-        # loop over parameters to plot true distributions and samples
-        for i, (targ, targ_err, axis) in enumerate(zip(dist_targs, dist_targ_errs, dist_plots.axes.values())):
-           
-            targ_range = np.linspace(param_limits[i][0], param_limits[i][1], 10000)     # finding range of x values for true distribution from latent distribution
-            gaussian = np.exp(-( ( (targ_range-targ)**2 ) / (2*(targ_err**2))) )             # calculating gaussian with this error
-            axis.plot(targ_range, gaussian, color='grey')
-            axis.fill_between(targ_range, gaussian, np.zeros(len(targ_range)), color='grey', alpha=0.3)
+    # multi-color plot
+    if specific_data:
+        # shape of multi_targs : param_number, spectrum_number, mean+error
+        multi_targs = specific_data['targets'].swapaxes(1,2).swapaxes(0,1)
+        # shape of multi_lats : param_number, spectrum_number, number of samples in that spectrums distribution
+        multi_lats = specific_data['latent'].swapaxes(1,2).swapaxes(0,1)
+        spec_names = specific_data['id']
+        object_names = specific_data['object']
+    else:
+        multi_targs = data['targets'].swapaxes(1,2).swapaxes(0,1)
+        multi_lats = data['latent'].swapaxes(1,2).swapaxes(0,1)
+        spec_names = data['ids']
 
-            for sample_num, sample in enumerate(torch.tensor(samples).swapaxes(0,1)[i]):
-                axis.plot([sample, sample], [0,1], color = colors[sample_num])
-        
-        plt.savefig(dir_name+'NF_distribution'+str(spec_num)+'.png', dpi=300)
+    # loop through each set of parameters, plotting, for 5? different spectra, their distributions from 10? data points
+    for i, (targ, lat, axis) in enumerate(zip(multi_targs, multi_lats, axes.values())):
+        # targ[spectrum number][value or error]
+
+        if specific_data:
+            for spec_num in range(len(targ)):
+                spec_name = spec_names[spec_num]
+
+                axis.errorbar(x=[targ[spec_num][0]]*n_points, xerr=[targ[spec_num][1]]*n_points, y=lat[spec_num][:n_points], 
+                            linestyle='None', capsize=1, ms=7, alpha=0.05, marker='o', color=colors[spec_name])
+
+        else:
+            for spec_num in range(num_specs):
+
+                axis.errorbar(x=[targ[spec_num][0]]*n_points, xerr=[targ[spec_num][1]]*n_points, y=lat[spec_num][:n_points], 
+                            linestyle='None', capsize=1, ms=7, alpha=0.05, marker='o', color=colors[spec_num])
+
+        if specific_data:
+
+            legend_elements = np.concat([
+                [Line2D([0], [0], color='grey', label='Multiple', linestyle='None', marker='o', alpha=0.5, markersize=10)],
+                # [Line2D([0], [0], color=colors[i], label='Multiple '+str(0), linestyle='None', marker='o', alpha=0.5, markersize=10)],
+                [Line2D([0], [0], color=colors[spec_names[i]], label=object_names[i], linestyle='None', marker='o', alpha=0.5, markersize=10)
+                for i in range(num_specs)]
+            ])
+        else:
+            legend_elements = np.concat([
+                [Line2D([0], [0], color='grey', label='Multiple', linestyle='None', marker='o', alpha=0.5, markersize=10)],
+                # [Line2D([0], [0], color=colors[i], label='Multiple '+str(0), linestyle='None', marker='o', alpha=0.5, markersize=10)],
+                [Line2D([0], [0], color=colors[i], label='Multiple'+str(i), linestyle='None', marker='o', alpha=0.5, markersize=10)
+                for i in range(num_specs)]
+            ])
+
+    fig.legend(handles=list(legend_elements), bbox_to_anchor=(0.5, 0.95), fancybox=False, shadow=False,
+                                ncol=num_specs+1, fontsize=20, handletextpad=0.05, columnspacing=0.1, loc   ='upper center')
+    
+    # fig.legend(fontsize=MINOR)
+    plt.savefig(dir_name+'NF_comparison.png', dpi=300, bbox_inches='tight')
 
 
-    # reconstructions for each spectra with each 3? samples plotted on the same graph (and then with compared to what xspec model predicts)
-
-    # [Batch_size/total number of spectra, number of data points in spectra, number of parameters]
-    inputs = data['inputs']
-    for spec_num, (input, axis) in enumerate(zip (inputs, axes.values())):
-        fig = plt.figure(figsize=(16,9))
-        axis = fig.gca()
-
-        inp = input[0]
-        inp_err = input[1]
-
-        # to get specta in terms of energies
-        # Open the FITS file
-        with fits.open('/Users/astroai/Downloads/spectra/'+data['ids'][spec_num]) as hdul:
-            # Print information about the structure of the FITS file
-            hdul.info()
-            # Extract the data (assuming it is in the second HDU, adjust index if necessary)
-            loaded_data = hdul[1].data  # Adjust the HDU index based on your file structure
-            channels = loaded_data['CHANNEL']
-
-        bins = np.array([[0, 20, 248, 600, 1200, 1494, 1500], [2, 3, 4, 5, 6, 2, 1]], dtype=int)
-        channels=_binning(channels, bins)
-
-        energies = ((channels * 10) + 5 ) / 1e3
-
-        cut_off = (0.3, 10)
-        cut_indices = np.argwhere((energies < cut_off[0]) | (energies > cut_off[1]))
-        energies = np.delete(energies, cut_indices)
-        
-        axis.set_xlabel('Energy (keV)', fontsize=MINOR)
-        axis.set_ylabel('cts / det / s/ keV', fontsize=MINOR)
-        axis.set_xscale('log')
-        # axis.set_yscale('log')
-
-        # plotting data points
-        axis.errorbar(x=energies[:240],y=inp, yerr=inp_err, linestyle="None", color='k', label='data')
-        # plotting xspec reconstruction
-        
-        Xset.chatter = 0
-        Xset.logChatter = 0
-
-        os.chdir('/Users/astroai/Projects/FSPNet/data/spectra/')
-        spectrum = Spectrum(data['ids'][spec_num])
-        AllData.ignore("bad")
-        spectrum.ignore("**-0.3 10.0-**")
-        AllModels.lmod('simplcutx', dirPath='/Users/astroai/Downloads/simplcutx/')
-
-        for plot_num, params in enumerate(torch.tensor(samples)):
-            margin = np.minimum(1e-6, 1e-6 * (param_limits[:, 1] - param_limits[:, 0]))
-            param_min = param_limits[:, 0] + margin
-            param_max = param_limits[:, 1] - margin
-            params = np.clip(params, a_min=param_min, a_max=param_max)
-
-            # xspec_params = [str(params[param_num].item())+" 0.0" for param_num in range(len(params))]
-            xspec_model = Model("tbabs(simplcutx(ezdiskbb))") #, setPars=xspec_params)
-            xspec_model.componentNames
-            xspec_model.TBabs.nH = str(params[0].item())+" 0.0"
-            xspec_model.simplcutx.Gamma = str(params[1].item())+" 0.0"
-            xspec_model.simplcutx.FracSctr = str(params[2].item())+" 0.0"
-            xspec_model.simplcutx.ReflFrac.frozen = True
-            xspec_model.simplcutx.kT_e.frozen = True
-            xspec_model.ezdiskbb.T_max = str(params[3].item())+" 0.0"
-            xspec_model.ezdiskbb.norm = str(params[4].item())+" 0.0"
-
-            # Fit.nIterations=1
-            # Fit.renorm()
-            # Fit.perform()
-
-            # Plot("ldata")??
-            Plot.xAxis="keV"
-            Plot.xLog=True
-            # Plot.yLog=False
-            Plot("model")
-            xs_energies = Plot.x()
-            edeltas = Plot.xErr()
-            foldedmodel = Plot.model()
-
-            nE = len(xs_energies)
-            stepenergies = list()
-            for i in range(nE):
-                stepenergies.append(xs_energies[i] - edeltas[i])
-            stepenergies.append(xs_energies[-1]+edeltas[-1])
-            foldedmodel.append(foldedmodel[-1])
-            
-            axis.step(stepenergies, 10**(np.array(foldedmodel)),where='post', linestyle='--', color=colors[plot_num], label='xspec'+str(plot_num))
-
-        # plotting decoder reconstruction
-        sample_transform = network.transforms['targets']
-        samples = sample_transform(np.array(samples))
-
-        transform = network.transforms['inputs']
-        # clear transforms
-        # network.transforms['inputs'] = None
-        recons = transform(decoder(samples), back=True)[0]
-        #reset transforms
-        # network.transforms['inputs'] = transform
-
-        for recon_num, recon in enumerate(recons):
-            axis.plot(energies[:240], recon, color=colors[recon_num], label='decoder'+str(recon_num))
-
-        plt.legend()
-        plt.savefig(dir_name+'NF_recons'+str(spec_num)+'.png', dpi=300)
-        
-
-def distribution_plot(
-    targs: dict,
-    lats: dict,
+def corner_plot(
+    data: dict,
     param_names: str | list[str],
     log_params: list[int],
     dir_name: str,
-    save_name: str,
-    err: str = False, #whether to plot the error distributions instead
-    show: bool = False,
-    Range: ndarray = None
     ):
 
-    """
-    Plots comparison between input and output parameters
+    c = ChainConsumer()
+    c.set_plot_config(PlotConfig(legend={'fontsize':20}))
 
-    Parameters
-    ----------
-    targs : dict
-        Target parameters
-    lats : dict
-        Target uncertainties
-    param_names : str | list[str]
-        Names of each parameter
-    log_params : list[int]
-        Defines which parameters are logged
-    dir_name : str
-        Name of the directory to save plot
-    save_name : str
-        File name to save plot
-    err : dict
-        Whether error should be plotted and whether it should be a separate plot
-    show : bool
-        Whether to show the plot before saving
-    """
+    # putting latent data into a data frame
+    NF_data = pd.DataFrame(data['latent'][:,0,:], columns=param_names)
+    
+    c.add_chain(Chain(samples=NF_data, name="Normalising Flow", color='#e0c700'))
 
-    axes, fig =  _init_subplots(subplot_grid(len(param_names)))
+    # getting the xspec data and putting into a data frame
+    dist_targs = data['targets'][:,0,:]
 
-    for i, (name, axis, lat_err, lat, targ_err, targ) in enumerate(zip(
-        param_names,
-        axes.values(),
-        lats[:,1,:],
-        lats[:,0,:],
-        targs[:,1,:],
-        targs[:,0,:])):
+    xspec_gauss_data = pd.DataFrame(dist_targs, columns=param_names).dropna()
+    c.add_chain(Chain(samples=xspec_gauss_data, name="XSPEC (Gauss)", color='#e41a1c'))
 
-        if i in log_params:     # conversion for log parameters
-            axis.set_xscale('log')
-            axis.set_yscale('log')
+    fig = c.plotter.plot()
 
-        if err==True:
-            axis.set_title('std' + name, fontsize=MAJOR)
-            # if name=='$\Gamma$':
-            #     axis.hist(targ_err, bins=10, label='target', range=[np.min(np.array([lat_err,targ_err])), np.max(np.array([lat_err,targ_err]))])
-            
-            # else:
-            axis.hist(targ_err, bins=10, label='target',  range=[min(lat_err), max(lat_err)])
-            axis.hist(lat_err,  bins=10, label='latent', alpha=0.3)
+    # fig.axes[20].set_xlim(-10, 30)
 
-        else:
-            axis.set_title('mean' + name, fontsize=MAJOR)
-            axis.hist(targ, bins=10, label='target', range=Range)
-            axis.hist(lat, alpha=0.3, bins=10, label='latent')
 
-    plt.legend(fontsize=MINOR)
-    plt.xticks(fontsize=MINOR)
-    plt.yticks(fontsize=MINOR)
+    plt.savefig(os.path.join(dir_name, 'corner_plot.png'))
 
-    if show:
-        fig.show()
-
-    fig.savefig(dir_name+save_name, dpi=300)
-
-def recon_plot_params(
-    inputs: ndarray,
-    preds: ndarray,
-    ids: ndarray,
-    save_name: str,
+def latent_corner_plot(
     dir_name: str,
-    lats: dict,
-    targs: dict,
-    names,
-    log: str = 'both'
+    data: dict | None = None,
+    specific_data: dict | None = None, #to choose which specific spectrum to take, from a list of spectra names)
+    xspec_data: dict | None = None,
+    param_names: str | list[str] = PARAM_NAMES,
+    in_param_samples: list = None,
+    num_specs: int = 3,
     ):
-    
-    """
-    Plots comparison between input and output parameters
 
-    Parameters
-    ----------
-    Inputs : dict
-        Input spectra
-    preds : dict
-        Reconstructed spectra
-    """
+    # To stop pandas dataframe from rounding
+    pd.set_option('display.precision', 10)
 
-    axes, fig =  _init_subplots(subplot_grid(2)) #, gridspec_kw = {'figure': {'tight_layout':True}})
+    if specific_data:
+        num_specs = len(specific_data['targets'].swapaxes(1,2).swapaxes(0,1))
+        colors = COLORS
+    else:
+        num_specs = np.min([num_specs, 5])
+        colors = COLORS_LIST
 
-    fig.suptitle('Reconstructed Spectra \n', fontsize=MAJOR)
 
-    for i, (axis, pred, input, input_err, lat, targ, id) in enumerate(zip(
-        axes.values(),
-        preds[:,0,:],
-        inputs[:,0,:],
-        inputs[:,1,:],
-        lats[:,0,:],
-        targs[:,0,:],
-        ids
-        )):
+    for spec_num in range(num_specs):
+        colour = colors[specific_data['id'][spec_num]] if specific_data else colors[spec_num]
 
-        # convert x axis to energy:
-        # energy = _channel_kev(np.arange(len(input)))
+        c = ChainConsumer()
+        c.set_plot_config(PlotConfig(legend={'fontsize':MAJOR}, label_font_size=MINOR, tick_font_size=16, max_ticks=4)) #, spacing=2))
 
-        # Fetch data from PyXspec
-        # background = pd.DataFrame(xspec.AllData(1).background.values, columns=['RATE'])
-        # spectrum = pd.DataFrame(np.stack((
-        # np.arange(background['RATE'].size),
-        # xspec.AllData(1).values,
-        # ), axis=1), columns=['CHANNEL', 'RATE'])
-
-        # # Initialize variables
-        # bins = np.array([[0, 20, 248, 600, 1200, 1494, 1500], [2, 3, 4, 5, 6, 2, 1]], dtype=int)
-
-        # if not cut_off:
-        #     cut_off = (0.3, 10)
-
-        # Open the FITS file
-        with fits.open('/Users/astroai/Downloads/spectra/'+id) as hdul:
-            # Print information about the structure of the FITS file
-            hdul.info()
-
-            # Extract the data (assuming it is in the second HDU, adjust index if necessary)
-            data = hdul[1].data  # Adjust the HDU index based on your file structure
-
-            # Assuming the data has a 'CHANNEL' column (check the structure using hdul.info())
-            channels = data[data['QUALITY'] == 2]['CHANNEL']
-
-        # Pre binned data
-        energy = _channel_kev(channels[26:])
+        # putting latent data into a data frame
+        if specific_data:
+            NF_data = pd.DataFrame(specific_data['latent'][spec_num], columns=param_names)
+            spec_name = specific_data['id'][spec_num]
+        else:
+            NF_data = pd.DataFrame(data['latent'][spec_num], columns=param_names)
+            spec_name = data['ids'][spec_num]
         
-        axis.set_xlabel('Energy (keV)', fontsize=MINOR)
-        axis.set_ylabel('cts / det / s/ keV', fontsize=MINOR) 
+        c.add_chain(Chain(samples=NF_data, name="Normalising Flow", color=colour, sigmas=[0,1,2]))
 
-        if log=='log':
-            axis.set_yscale('log')
+        # getting the xspec gauss data and putting into a data frame
+        if specific_data:
+            dist_targs = specific_data['targets'][spec_num][0]
+            dist_targ_errs = specific_data['targets'][spec_num][1]
+        else: 
+            dist_targs = data['targets'][spec_num][0]
+            dist_targ_errs = data['targets'][spec_num][1]
 
-        elif log=='both':
-            if i==0:
-                axis.set_yscale('log')
+        if dist_targ_errs.all()!=0:
+            targ_samples = np.array([
+                np.random.normal(loc=targ, scale=targ_err, size=3000) 
+                for targ, targ_err in zip(dist_targs, dist_targ_errs)]).swapaxes(0,1)
+            cut_indices = [np.argwhere((targ_sample<=0)) for targ_sample in targ_samples] 
+            targ_samples = [np.delete(targ_sample, cut_index) for targ_sample, cut_index in zip(targ_samples, cut_indices)]
+                
+            xspec_gauss_data = pd.DataFrame(targ_samples, columns=param_names).dropna()
+            c.add_chain(Chain(samples=xspec_gauss_data, name="XSPEC (Gauss)", color='#e41a1c', sigmas=[0,1,2]))
+        else:
+            xspec_gauss_data = None
 
-        axis.errorbar(energy, input, yerr=input_err, marker='o', markersize=3, capsize=CAPSIZE, linestyle='None', label='input')
-        axis.scatter(energy, pred, label='reconstruction', s=5, c='#ff7f0e')
+        # getting xspec MCMC data and putting into a dataframe and chain
+        if xspec_data:
+            # xspec_spec_num = int(np.argwhere(specific_data['id'][spec_num]==xspec_data['id']))
+            xspec_MCMC_data = pd.DataFrame(np.array(xspec_data['posteriors'][spec_num]).swapaxes(0,1)[:3000,:], columns=param_names)
+            
+            c.add_chain(Chain(samples=xspec_MCMC_data, name='XSPEC (MCMC)', color='gray', sigmas=[0,1,2]))
 
-        #set text for parameters of given plot
-        str_names = ''
-        str_targ = 'target'
-        str_lat = 'latent'
-        for i, (name, l , t) in enumerate(zip(
-            names,
-            lat,
-            targ
-            )):
-            str_names+='\n'+name+':'
-            str_targ+='\n'+str(round(t,3))
-            str_lat+='\n'+str(round(l,3))
+        fig = c.plotter.plot()
 
-        axis.text(-0.05, 1.05, str_names, verticalalignment='bottom', horizontalalignment='left', 
-                   transform=axis.transAxes, fontsize=MINOR)
-        axis.text(0.4, 1.05, str_targ, verticalalignment='bottom', horizontalalignment='left', 
-                   transform=axis.transAxes, fontsize=MINOR)
-        axis.text(0.7, 1.05, str_lat, verticalalignment='bottom', horizontalalignment='left', 
-                   transform=axis.transAxes, fontsize=MINOR)
+        # settings for specific data plot vs general data plot
+        if specific_data:
+            fig.axes[2].set_title(specific_data['object'][spec_num], fontsize=MAJOR)
+            min_quant = MIN_QUANT[spec_name]
+            max_quant = MAX_QUANT[spec_name]
+        else:
+            min_quant=0.01
+            max_quant=0.99
+
+        # adding better limits to axes
+        quantile_limits(
+            fig,
+            min_quant, 
+            max_quant, 
+            param_names,
+            NF_data = NF_data,
+            xspec_gauss_data = xspec_gauss_data if xspec_gauss_data else None,
+            # xspec_MCMC_data
+            object_name = specific_data['object'][spec_num] if specific_data else None
+        )
         
-        axis.tick_params(axis='x', labelsize=MINOR)
-        axis.tick_params(axis='y', labelsize=MINOR)
-        axis.margins(0.05, 0.05)
+        plt.savefig(os.path.join(dir_name, 'latent_corner_plot'+str(spec_num)+'.png'), dpi=300)
 
-        if i==1:
-            axis.legend(fontsize=MINOR)
+        # add sample lines
+        if in_param_samples:
+            param_samples = in_param_samples[spec_num]
+            for bottom_plot_num in range(0,len(param_samples[0])):
+                for left_plot_num in range(0,bottom_plot_num+1):
+                    if bottom_plot_num!=left_plot_num:
+                        if dist_targ_errs.all()==0:
+                            fig.axes[bottom_plot_num*5+left_plot_num].plot(dist_targs[left_plot_num], dist_targs[bottom_plot_num], marker='*', linestyle='None', color=colour, markersize=20)
+                        fig.axes[bottom_plot_num*5+left_plot_num].plot(param_samples[0][left_plot_num], param_samples[0][bottom_plot_num], marker='*', linestyle='None', color='k', markersize=20)
+                        fig.axes[bottom_plot_num*5+left_plot_num].axvline(param_samples[0][left_plot_num], color='k', linewidth=2) #colors[spec_name])
+                        fig.axes[bottom_plot_num*5+left_plot_num].axhline(param_samples[0][bottom_plot_num], color='k', linewidth=2) #colors[spec_name])
+                    else:
+                        fig.axes[bottom_plot_num*5+left_plot_num].axvline(param_samples[0][bottom_plot_num], color='k', linewidth=2)
+        
+        # fig = c.plotter.plot()
+        plt.savefig(os.path.join(dir_name, 'latent_corner_plot'+str(spec_num)+'_1samp.png'), dpi=300)
 
-    plt.xticks(fontsize=MINOR)
-    plt.yticks(fontsize=MINOR)
+def param_pairs_plot(    
+    data: dict,
+    dir_name: str,
+    log_params: list[int]=LOG_PARAMS,
+    param_names: list[str] = PARAM_NAMES,
+    ): 
 
-    fig.savefig(dir_name+save_name, dpi=300)
+    param_pair_axes = plot_param_pairs(
+    data=np.array(data['targets'][:,0,:]),
+    plots_dir=dir_name,
+    save_name='param_pair_plot',
+    log_params=log_params,
+    param_names=param_names,
+    colour='#4cb555',
+    scatter_colour='#4cb555',
+    alpha=0.7,
+    )
 
-# def recon_plot_params_NF(
-#     data: dict,
-#     samples: int,
-#     dir_name: str
-#     ):
+    param_pair_data=np.squeeze(data['latent']).swapaxes(0,1)
+    ranges = [None] * param_pair_data.shape[0]
+    # Plot scatter plots & histograms
+    for i, (axes_row, y_data, y_range) in enumerate(zip(param_pair_axes, param_pair_data, ranges)):
+            for j, (axis, x_data, x_range) in enumerate(zip(axes_row, param_pair_data, ranges)):
+                if i == j:
+                    _plot_histogram(x_data, axis, log=i in log_params, data_range=x_range, colour='#8445cc', alpha=0.5)
+                    axis.tick_params(labelleft=False, left=False)
+                elif j < i:
+                    axis.scatter(
+                        x_data[:1000],
+                        y_data[:1000],
+                        s=20,
+                        alpha=0.3,
+                        color='#8445cc'
+                    )
+                else:
+                    axis.set_visible(False)
 
-    
+    plt.savefig(dir_name+'param_pair_plot.png', dpi=600)
 
 
-    
+
+
 
 def recon_plot(
-    inputs: dict,
-    preds: dict,
-    ids: ndarray,
-    save_name: str,
+    decoder,
+    network,
     dir_name: str,
-    log_plot: str = 'both'
+    data: dict | None = None,
+    specific_data: dict | None = None,
+    all_param_samples: list | None = None,
+    num_specs: int = 3,
+    data_dir: str = '/Users/astroai/Projects/FSPNet/data/spectra/',
+    synthetic_dir: str = SYNTHETIC_DIR,
+    spec_scroll = 0,
     ):
+
+    # decoder and xspec reconstructions for each spectra from one set of sampled parameters
+    # [Batch_size/total number of spectra, number of data points in spectra, number of parameters] - all_params_samples shape
     
-    """
-    Plots comparison between input and output parameters
+    # gets the input spectra from either data or specific data
+    if specific_data:    
+        num_specs = len(specific_data['targets'].swapaxes(1,2).swapaxes(0,1))
 
-    Parameters
-    ----------
-    Inputs : dict
-        Input spectra
-    preds : dict
-        Reconstructed spectra
-    """
+    # loop through spectra, getting reconstructions and plotting for each 
+    for spec_num in range(spec_scroll, num_specs+spec_scroll):
 
-    axes, fig =  _init_subplots(subplot_grid(4)) #, gridspec_kw = {'figure': {'tight_layout':True}})
-
-    fig.suptitle('Reconstructed Spectra \n', fontsize=MAJOR)
-
-    for i, (axis, pred, input, id) in enumerate(zip(
-        axes.values(),
-        preds,
-        inputs,
-        # inputs[:,1,:],
-        ids
-        )):
-
-        # convert x axis to energy:
-        # energy = _channel_kev(np.arange(len(input)))
-
-        # Fetch data from PyXspec
-
-        # # Initialize variables
-        bins = np.array([[0, 20, 248, 600, 1200, 1494, 1500], [2, 3, 4, 5, 6, 2, 1]], dtype=int)
-
-
-        # if not cut_off:
-        #     cut_off = (0.3, 10)
-
-        # Pre binned data
-
-        # energy = _channel_kev(np.arange(20,len(input)+20))
-
-        # Initialize variables
- 
-        # Open the FITS file
-        with fits.open('/Users/astroai/Downloads/spectra/'+id) as hdul:
-            # Print information about the structure of the FITS file
-            hdul.info()
-
-            # Extract the data (assuming it is in the second HDU, adjust index if necessary)
-            data = hdul[1].data  # Adjust the HDU index based on your file structure
-
-            # Assuming the data has a 'CHANNEL' column (check the structure using hdul.info())
-            # channels = data[data['QUALITY'] == 2]['CHANNEL']
-            channels = data['CHANNEL']
-
-        #energies = _channel_kev(channels)
-
-        channels=_binning(channels, bins)
-
-        energies = ((channels * 10) + 5 ) / 1e3
-
-        cut_off = (0.3, 10)
-        cut_indices = np.argwhere((energies < cut_off[0]) | (energies > cut_off[1]))
-        energies = np.delete(energies, cut_indices)
+        # if specific data given, use that. use normal data otherwise. Note: [0] is to select one set of parameter samples when there may be more
+        if specific_data:
+            input = specific_data['inputs'][spec_num]
+            targs = specific_data['targets'][spec_num][0]
+            lats = specific_data['latent'][spec_num][0]
+            spec_name = specific_data['id'][spec_num]
+            color_id = spec_name
+            colors = COLORS
+        else:
+            input = data['inputs'][spec_num]
+            targs = data['targets'][spec_num][0]
+            lats = data['latent'][spec_num][0]
+            spec_name = data['ids'][spec_num]
+            color_id = spec_num-spec_scroll
+            colors = COLORS_LIST
         
+        
+        # if we have given samples, use those instead of data['lats'][0]
+        if all_param_samples:
+            lats = all_param_samples[spec_num-spec_scroll][0]
+
+        # input spectrum and errors
+        inp = input[0]
+        inp_err = input[1]
+
+        # getting energy for decoder plots and spectra from decoder and xspec reconstructions
+
+        dec_energy = get_energies(spec_name if type(spec_name)==str else 'js_ni0100320101_0mpu7_goddard_GTI0.jsgrp')[:240]
+
+        lat_dec_recon = decoder_reconstruction(lats, decoder, network)
+        true_dec_recon = decoder_reconstruction(targs, decoder, network)
+
+        lat_xs_energy, lat_xs_recon = xspec_reconstruction(lats, spec_name)   
+        true_xs_energy, true_xs_recon = xspec_reconstruction(targs, spec_name)
+
+        # setting up figure
+        fig = plt.figure(figsize=(16,9))
+        axis = fig.gca()
+        if specific_data:
+            axis.set_title(specific_data['object'][spec_num], fontsize=MAJOR)
+        else:
+            axis.set_title('Reconstruction', fontsize=MAJOR)
         axis.set_xlabel('Energy (keV)', fontsize=MINOR)
-        axis.set_ylabel('cts / det / s/ keV', fontsize=MINOR) 
-
-        if log_plot=='log':
-            axis.set_yscale('log')
-
-        elif log_plot=='both':
-            if i==0 or i==1:
-                axis.set_yscale('log')
-
-            #axis.set_xscale('log')
-
-        # for without uncertainties
-        axis.errorbar(energies[0:240], input[0], yerr=input[1], label='input', marker='o', markersize=3,  capsize=CAPSIZE, linestyle='None')
-        axis.scatter(energies[0:240], pred, label='reconstruction', s=5, c='#ff7f0e')
-        # for with uncertainties 
-        # axis.scatter(energies[0:240], input, label='input', s=5, c='b')
-        
-        axis.tick_params(axis='x', labelsize=MINOR)
-        axis.tick_params(axis='y', labelsize=MINOR)
-
-        axis.margins(0.05, 0.05)
-
-        if i==1:
-            axis.legend(fontsize=MINOR)
-
+        axis.set_ylabel('cts / det / s/ keV', fontsize=MINOR)
+        axis.set_xscale('log')
+        axis.set_yscale('log')
         plt.xticks(fontsize=MINOR)
         plt.yticks(fontsize=MINOR)
+        axis.set_xlim(dec_energy[0], dec_energy[-1])
+        axis.set_ylim(0, 1.1*np.max(np.concatenate([np.squeeze(lat_dec_recon), lat_xs_recon, np.squeeze(true_dec_recon), true_xs_recon, inp+inp_err])))
+                
+        # plot data points
+        axis.errorbar(x=dec_energy,y=inp, yerr=inp_err, linestyle="None", color='k', label='data', capsize=3, elinewidth=2)
+        plt.legend(fontsize=MINOR)
+        plt.savefig(dir_name+'NF_spectra'+str(spec_num)+'.png', dpi=300)
 
-    fig.savefig(dir_name+save_name, dpi=300)
+        # decoder reconstructions with latent
+        axis.plot(dec_energy, lat_dec_recon[0], markersize=5, label='decoder latent', color=colors[color_id], linewidth=2)
+        plt.legend(fontsize=MINOR)
+        plt.savefig(dir_name+'NF_spectra_recon'+str(spec_num)+'.png', dpi=300)
+
+        # xspec reconstructions with latent
+        axis.plot(lat_xs_energy, lat_xs_recon, linestyle="--", linewidth=2, color=colors[color_id], label='xspec latent')
+        plt.legend(fontsize=MINOR)
+        plt.savefig(dir_name+'NF_recon_latentonly'+str(spec_num)+'.png', dpi=300)
+
+        # decoder reconstrucitons with ground truth
+        axis.plot(dec_energy, true_dec_recon[0], markersize=5, label='decoder ground truth', color='#de5454', linewidth=2)
+        # xspec reconstrucitons with ground truth
+        axis.plot(true_xs_energy, true_xs_recon, linestyle="--", linewidth=2, color='#de5454', label='xspec ground truth')
+        plt.legend(fontsize=MINOR)
+        plt.savefig(dir_name+'NF_recons'+str(spec_num)+'.png', dpi=300)
+
+        
+
+def post_pred_plot(
+    decoder,
+    network,
+    dir_name: str,
+    data: dict | None = None,
+    specific_data: dict | None = None,
+    n_samples: int | None = 100,
+    post_pred_samples: list | ndarray | None = None,
+    num_specs: int = 3,
+    data_dir: str = '/Users/astroai/Projects/FSPNet/data/spectra/'
+    ):
+
+    colors: dict = COLORS
+
+    # number of spectra which is either the number of specific spectra or min(num_specs, 5)
+    if specific_data:
+        num_specs = len(specific_data['targets'].swapaxes(1,2).swapaxes(0,1))
+        colors = COLORS
+    else:
+        num_specs = np.min([num_specs, 5])
+        colors = COLORS_LIST
+        
+    # if we haven't been given the samples already
+    if not post_pred_samples:
+        if  specific_data:
+            post_pred_samples = sample(specific_data, num_specs=num_specs, num_samples=n_samples)
+        else:
+            post_pred_samples = sample(data, num_specs=num_specs, num_samples=n_samples)
+
+    # looping over each spectrum
+    for spec_num, param_samples in enumerate(post_pred_samples):
+
+        colour = colors[spec_name] if specific_data else colors[spec_num]
+
+        # true values, their errors and our latent distribution
+        if specific_data:
+            targs = specific_data['targets'][spec_num][0]
+            spec_name = specific_data['id'][spec_num]
+            input = specific_data['inputs'][spec_num]
+        else:
+            targs = data['targets'][spec_num][0]
+            spec_name = data['ids'][spec_num]
+            input = data['inputs'][spec_num]
+
+        # input_data
+        inp = input[0]
+        inp_err = input[1]
+        
+        # getting energy for decoder plots and spectra from decoder and xspec reconstructions
+        if type(spec_name)==str:
+            dec_energy = get_energies(spec_name, data_dir)[:240]
+        else:
+            dec_energy = get_energies('js_ni0100320101_0mpu7_goddard_GTI0.jsgrp')[:240]
+
+        # decoder reconstructions
+        lat_dec_recons=[]
+        for plot_num, params in enumerate(torch.tensor(param_samples)):
+            if spec_name==str:
+                lat_dec_recons.append(decoder_reconstruction(params, decoder, network, spec_name, data_dir if data_dir else None))
+            else:
+                lat_dec_recons.append(decoder_reconstruction(params, decoder, network))
+
+        # xspec ground truth reconstructions
+        true_xs_energy, true_xs_recon = xspec_reconstruction(targs, spec_name)
+
+        # plotting
+        fig = plt.figure(figsize=(16,9))
+        axis = fig.gca()
+        if specific_data:
+            axis.set_title(specific_data['object'][spec_num], fontsize=MAJOR)
+        else:
+            axis.set_title('Reconstruciton', fontsize=MAJOR)
+        axis.set_xlabel('Energy (keV)', fontsize=MINOR)
+        axis.set_ylabel('cts / det / s/ keV', fontsize=MINOR)
+        axis.set_xscale('log')
+        axis.set_yscale('log')
+        plt.xticks(fontsize=MINOR)
+        plt.yticks(fontsize=MINOR)
+        axis.set_xlim(dec_energy[0], dec_energy[239])
+        axis.set_ylim(0, 1.1*np.max(np.concatenate([[np.max(lat_dec_recons)], true_xs_recon, inp+inp_err])))
+
+        # decoder reconstructions
+        axis.plot(dec_energy, np.squeeze(lat_dec_recons[0]), color=colour, marker=None, label='decoder latent', alpha=0.1)
+        for lat_dec_recon in lat_dec_recons[1:]:
+            axis.plot(dec_energy, np.squeeze(lat_dec_recon), color=colour, alpha=0.1)
+
+        # xspec reconstructions
+        axis.plot(true_xs_energy, true_xs_recon, linestyle="--", linewidth=2, color='#de5454', label='xspec ground truth')
+
+        # data
+        axis.errorbar(x=dec_energy[:240],y=inp, yerr=inp_err, linestyle="None", color='k', capsize=3, elinewidth=2, label='data')
+
+        plt.legend(fontsize=MINOR)
+        plt.savefig(dir_name+'NF_post_pred_plot'+str(spec_num)+'.png', dpi=300)
+
+    return post_pred_samples
+
+def rec_2d_plot(
+    decoder,
+    network,
+    dir_name: str,
+    data: dict | None = None,
+    specific_data: dict | None = None,
+    data_dir: str = '/Users/astroai/Projects/FSPNet/data/spectra/'
+    ):
+
+    # if we have specific data, use that. otherwise use normal data - make length of spectra 240 for non specific and length of specific data for specific
+    if specific_data:
+        latents = specific_data['latent'][:240,0,:]
+        targets = specific_data['targets'][:240,0,:]
+        spec_names = specific_data['id'][:240]
+        num_specs = len(specific_data['targets'].swapaxes(1,2).swapaxes(0,1))
+    else:
+        latents = data['latent'][:240,0,:]
+        targets = data['targets'][:240,0,:]
+        spec_names = data['ids'][:240]
+        num_specs = 240
+
+    
+    # getting energy for decoder plots and spectra from decoder and xspec reconstructions
+    dec_energy = get_energies(spec_names[1], data_dir)[:240]
+
+    lat_dec_recons = []
+    for spec_num, (params, spec_name) in enumerate(zip(latents, spec_names,)):
+        lat_dec_recons.append(decoder_reconstruction(params, decoder, network, spec_name, data_dir if data_dir else None))
+    
+    
+    X, Y = np.meshgrid(dec_energy, np.linspace(0, num_specs))
+    Z = np.meshgrid(np.array(lat_dec_recons).squeeze())
+
+    fig = plt.figure(figsize=(16,9))
+    ax = plt.gca()
+
+    pc = ax.imshow(Z, cmap='plasma') # norm=LogNorm(vmin=0.01, vmax=100))
+    fig.colorbar(pc, ax=ax, extend='both')
+    ax.set_title('imshow() with LogNorm()')
