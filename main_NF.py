@@ -1,17 +1,13 @@
-
 from fspnet.spectrum_fit import init
 from fspnet.spectrum_fit import AutoencoderNet 
-import xspec
-#from fspnet.utils.data import __get_tiem__
-from astropy.io import fits
 
 import os
 import pickle
-from typing import Any, Self, BinaryIO
+from typing import Any
 
 import torch
+import random
 import numpy as np
-from netloader.networks import Decoder
 import netloader.networks as nets
 from netloader.network import Network
 from netloader.utils import transforms
@@ -23,59 +19,23 @@ from numpy import ndarray
 from fspnet.utils import plots
 from fspnet.utils.utils import open_config
 from fspnet.utils.data import SpectrumDataset, loader_init
-from fspnet.utils.analysis import autoencoder_saliency, decoder_saliency, pyxspec_test
 from fspnet.spectrum_fit import pyxspec_tests
-from fspnet.utils.plots import plot_param_pairs, _plot_histogram
-
-# from fspnet.utils.multiprocessing
-# from netloader.layers.convolutional
-# from netloader.layers.linear
-
 
 import matplotlib.pyplot as plt
 
-from VAE_plots import comparison_plot_NF, distribution_plot_NF, recon_plot_NF, post_pred_plot_NF, latent_space_scatter_NF
-from VAE_plots import param_pair_plot_NF, plot_performance_NF, corner_plot_latent_NF, corner_plot_NF
+from VAE_plots import comparison_plot, recon_plot, post_pred_plot, latent_corner_plot, rec_2d_plot, param_pairs_plot
+from VAE_plots import performance_plot
+from misc_utils import sample
 
-import sciplots
 plt.style.use(["science", "grid", 'no-latex'])
 
 #gaussian loss for variational autoencoder with uncertainties
 def gaussian_loss(predictions, target):
-    #return function from gaussian loss website
     return nn.GaussianNLLLoss()(predictions[:,0], target[:,0], target[:,1]**2) #(spectra)(B,240), target[:,1]**2 (B,2,240) (uncertainty)) - for variational with uncertaimties??
-    # return nn.GaussianNLLLoss()(predictions target, target**2)
 
 #MSE loss for variational autoencoder
 def mse_loss(predictions, target):
     return nn.MSELoss()(predictions[:,0], target[:,0]) #(spectra))(B,240)
-
-class TestDataset(torch.utils.data.Dataset):
-    """
-    Fake dataset to test netloader.networks
-    """
-    def __init__(self, in_shape: list[int]):
-        self._in_shape: list[int] = in_shape
-        self._device: torch.device = get_device()[1]
-        self.transform: transforms.BaseTransform | None = None
-
-    def __len__(self) -> int:
-        return 600
-
-    def __getitem__(self, item: int):
-        # target: torch.Tensor = torch.randint(0, 10, size=(1, 1)).to(self._device).float()
-        # in_tensor: torch.Tensor = (torch.ones(size=(1, *self._in_shape[1:])).to(self._device) *
-        #                            target[..., None, None])
-
-        target: torch.Tensor = torch.randint(0, 10, size=(1, 1)).to(self._device).float()
-        in_tensor: torch.Tensor = torch.ones(size=(1, *self._in_shape[1:])).to(self._device) * target
-
-
-        if self.transform:
-            target = self.transform(target)
-
-        return 0, target[0], in_tensor[0]
-
 
 def net_init(
         datasets: tuple[SpectrumDataset, SpectrumDataset],
@@ -132,8 +92,6 @@ def net_init(
             data=transform(datasets[1].spectra),
             mean=False,
         ))
-        # for fake dataset
-        # transform = None
 
         param_transform = transforms.MultiTransform([
             transforms.NumpyTensor(),
@@ -144,7 +102,9 @@ def net_init(
             param_transform(datasets[1].params), #
             dim=0,
         ))
+
         # for fake dataset
+        # transform = None
         # param_transform = None
 
         decoder = Network(
@@ -164,7 +124,6 @@ def net_init(
         )
 
         decoder.transforms['inputs'] = param_transform
-        #changes decoder loss to gaussian for variational autoencoder
         decoder.loss_func = gaussian_loss    #changes loss to gaussian loss - can look into other typs of loss
 
     if e_load_num:
@@ -210,16 +169,14 @@ def net_init(
         #     transform=param_transform,
         # )
 
-        #changes autoencoder loss for variational autoencoder, mse for non-variational autoencoder
+        #Loss function settings for autoencoder
         net.reconstruct_func = gaussian_loss   
-        net.latent_func = mse_loss              #adds latent loss as mse
-
+        net.latent_func = mse_loss           
         net.latent_loss = 1 #3.0e-1
-        net.flowlossweight = 1e-1 #3.0e-1
-        net.reconstruct_loss = 1e-3 #4.0e-1
+        net.flowlossweight = 1 #1e-1 #3.0e-1
+        net.reconstruct_loss = 1 #1e-3 #4.0e-1
         net.kl_loss = 0 #
-        net.bound_loss = 0 # 3e-1 
-
+        net.bound_loss = 0 # 3e-1
 
         net.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau( #included scheduler to implement minimum learning rate
             net.optimiser,
@@ -234,27 +191,22 @@ def net_init(
             dataset.spectra,
             uncertainty=dataset.uncertainty,
         )
-
-        # for fake spectra
-        # dataset = transform(
-        #     dataset)
-
-        # for without uncertainties
-        # dataset.spectra = transform(dataset.spectra)
-
-        # # for with uncertainties
         dataset.params, dataset.param_uncertainty = param_transform(
             dataset.params,
             uncertainty=dataset. param_uncertainty,
         )
 
+        # for without uncertainties
+        # dataset.spectra = transform(dataset.spectra)
+        # dataset.params = param_transform(dataset.params)
+
+
         # for fake spectra
+        # dataset = transform(
+        #     dataset)
         # dataset = param_transform(
         #     datasets
         # )
-
-        # for without uncertainties
-        # dataset.params = param_transform(dataset.params)
 
     return decoder.to(device), net.to(device)
     '''
@@ -306,18 +258,16 @@ def init(config: dict | str = './config.yaml') -> tuple[
     decoder.idxs = d_dataset.idxs
     
     return e_dataset, d_dataset, e_loaders, d_loaders, decoder, net
+
     # added e_dataset, d_dataset changed. put this function into code
     # do the same with net_init - so you dont have to untransfrom and retransform
 
     # for fake dataset:
     # dataset = TestDataset((1,1,240))
     # decoder, net = net_init((dataset, dataset), config)
-
-    # loader = DataLoader(dataset, batch_size=60, shuffle=False)
-
+    # loader = DataLoader(dataset, batch_size=60, shuffle=False
     # net.idxs = dataset.idxs
     # decoder.idxs = dataset.idxs
-
     # return dataset, dataset, (loader, loader), (loader, loader), decoder, net
 
 class NFautoencoder(nets.Autoencoder):
@@ -372,8 +322,8 @@ class NFautoencoder(nets.Autoencoder):
             latent = self.net.checkpoints[-1].sample([1])[0]
         
         # Define a dictionary for loss components
-        loss_components = {
-            'reconstruct': self.reconstruct_loss * self.reconstruct_func(output, in_data),
+        loss_components = { #torch.log1p() in recon? - might be unstable trianing for negative values
+            'reconstruct': self.reconstruct_loss * self.reconstruct_func(output, in_data ),
             'flow': -1 * self.flowlossweight * self.net.checkpoints[-1].log_prob(target).mean(),
             'latent': self.latent_loss * self.latent_func(latent, target) if self.latent_loss and latent is not None else None,
             'bound': self.bound_loss * torch.mean(torch.cat((
@@ -411,7 +361,7 @@ class NFautoencoder(nets.Autoencoder):
         tuple[(N,...) ndarray, ...]
             N predictions for the given data
         """
-        # for nonvariational wihtout uncertainties??
+        # for nonvariational wihtout uncertainties?? - uses checkpoints
         # return (
         #     self.net(data).detach().cpu().numpy(),
         #     self.net.checkpoints[-1].detach().cpu().numpy(),
@@ -460,8 +410,6 @@ class NFautoencoderNetwork(AutoencoderNet):
         # return self.net[1](torch.cat((x, self.net[0].checkpoints[-1][:,-1:]), dim=1))     #for variational - when we want mu and sigma from checkpoint layer in encoder
 
 
-
-
 '''shows what the data file looks like
 with open('./data/spectra.pickle', 'rb') as file:
     data = pickle.load(file)
@@ -469,27 +417,20 @@ print(data)
 '''
 
 # ctrl (or command) click on 'SplineFlow' here to see how Ethan implements the normalising flow
-from netloader.layers.flows import SplineFlow
+# from netloader.layers.flows import SplineFlow
 
 # settings
 MAJOR = 26
 MINOR = 20
 TICK = 16
-num_epochs = 300
+num_epochs = 50
+real_epochs = 50
 learning_rate = 1.0e-3 #in config: 1e-4
 predict = False
-
-log_params = [0,2,3,4]
-param_names = ['$N_{H}$ $(10^{22}\ cm^{-2})$', '$\Gamma$', '$f_{sc}$',r'$kT_{\rm disk}$ (keV)','$N$']
-# These are likely to be redundant - for my plotting functions which I need to tidy up
-just_err = {
-    'plot': True,   # plots error
-    'sep': True     # plots it separate to parameters
-}
-no_err = {
-    'plot': False, 
-    'sep': False    
-}
+predict_for_synthetic = True
+plot_synthetic = True
+plot_specific = False
+SPEC_SCROLL=0
 
 
 #initialise data loaders and networks
@@ -513,20 +454,20 @@ net.optimiser = optim.AdamW(net.net.parameters(), lr=learning_rate)
 net.scheduler = optim.lr_scheduler.ReduceLROnPlateau(net.optimiser, factor=0.5, min_lr=1e-6,)
 
 # train autoencoder
-net.training(num_epochs, e_loaders)
+net.training(num_epochs, d_loaders)
 
-# for training outputs
-# net.training(101, e_loaders)
-# directory+="e_training/"
-# for validation outputs
-# net.training(1, e_loaders)
-# directory+="e_validation/"
+# train only first few layers of encoder - check layers 
+# net.net.net[0].net[2:].requires_grad_(False) 
+# net.net.net[0].net[12].requires_grad_(True) 
 
+# reset optimiser
+# net.optimiser = optim.AdamW(net.net.parameters(), lr=learning_rate*0.1)
+# net.scheduler = optim.lr_scheduler.ReduceLROnPlateau(net.optimiser, factor=0.5, min_lr=1e-6,)
 
+# net.training(num_epochs+real_epochs, e_loaders)
 
 #--- making predictions
-if predict == True:
-
+if predict:
     # save transforms
     transform = net.transforms['inputs']
     param_transform = net.transforms['targets']
@@ -534,16 +475,29 @@ if predict == True:
     net.transforms['inputs'] = None
     net.transforms['targets'] = None
 
-    data = net.predict(e_loaders[-1], num_samples=1, input_=True)
-    data1 = net.predict(e_loaders[-1], num_samples=1000, input_=True)
+
+    if predict_for_synthetic:
+        pred_loader = d_loaders
+        pred_dataset = d_dataset
+    else:
+        pred_loader = e_loaders
+        pred_dataset = e_dataset
+
+    data = net.predict(pred_loader[-1], num_samples=1, input_=True)
+    data1 = net.predict(pred_loader[-1], num_samples=3000, input_=True)
 
     names = ['js_ni0100320101_0mpu7_goddard_GTI0.jsgrp', 
             'js_ni0103010102_0mpu7_goddard_GTI0.jsgrp',
             'js_ni1014010102_0mpu7_goddard_GTI30.jsgrp',
             'js_ni1050360115_0mpu7_goddard_GTI9.jsgrp',
             'js_ni1100320119_0mpu7_goddard_GTI26.jsgrp']
-    train_data = net.predict(e_loaders[0], num_samples=1000, input_=True)
-    val_data = net.predict(e_loaders[1], num_samples=1000, input_=True)
+    object_names=['Cyg X-1 (2017)',
+              'GRS 1915+105',
+              'LMC X-3',
+              'MAXI J1535-571',
+              'Cyg X-1 (2018)']
+    train_data = net.predict(e_loaders[0], num_samples=3000, input_=True)
+    val_data = net.predict(e_loaders[1], num_samples=3000, input_=True)
     train_idxs = np.isin(train_data['ids'], names)
     val_idxs = np.isin(val_data['ids'], names)
     # # Then with the idxs, you can get the posteriors (or whatever else you want from the predicitons) by:
@@ -551,25 +505,31 @@ if predict == True:
     latent = np.concat((train_data['latent'][train_idxs],val_data['latent'][val_idxs]), axis=0)
     inputs = np.concat((train_data['inputs'][train_idxs], val_data['inputs'][val_idxs]), axis=0)
     preds = np.concat((train_data['preds'][train_idxs], val_data['preds'][val_idxs]), axis=0)
-    names = np.concat((train_data['ids'][train_idxs], val_data['ids'][val_idxs]), axis=0)
+    new_names = np.concat((train_data['ids'][train_idxs], val_data['ids'][val_idxs]), axis=0)
+
+    # Reorder object_names to match new names
+    name_to_object = dict(zip(names, object_names))
+    new_object_names = [name_to_object[name] for name in new_names]
 
     specific_data = {
-        'id': names,
+        'id': new_names,
         'targets': targets,
         'latent': latent,
         'inputs': inputs,
         'preds': preds,
+        'object': new_object_names
     }
 
-    param_uncertainties = e_dataset.param_uncertainty[np.isin(e_dataset.names, data['ids'])]  # get uncertainties in 'ground truth' parameters
-    param_uncertainties1 = e_dataset.param_uncertainty[np.isin(e_dataset.names, data1['ids'])]
+    param_uncertainties = pred_dataset.param_uncertainty[np.isin(pred_dataset.names, data['ids'])]  # get uncertainties in 'ground truth' parameters
+    param_uncertainties1 = pred_dataset.param_uncertainty[np.isin(pred_dataset.names, data1['ids'])]
 
+    # orders param_uncertainties
     specific_param_uncertainties = []
-    for i in range(len(names)):
-        specific_param_uncertainties.append(e_dataset.param_uncertainty[np.isin(e_dataset.names, names[i])])
+    for i in range(len(specific_data['id'])):
+        specific_param_uncertainties.append(e_dataset.param_uncertainty[np.isin(e_dataset.names, specific_data['id'][i])])
     specific_param_uncertainties = np.squeeze(np.array(specific_param_uncertainties))
 
-    # # # untransforms and stacks uncertainties
+    # untransforms and stacks uncertainties
     data['targets'] = np.stack(param_transform(data['targets'], back=True,
                                                 uncertainty=param_uncertainties), axis=1)
     data['inputs'] = np.stack(transform(data['inputs'][:,0], back=True,
@@ -583,7 +543,7 @@ if predict == True:
     specific_data['inputs'] = np.stack(transform(specific_data['inputs'][:,0], back=True,
                                                 uncertainty=specific_data['inputs'][:,1]), axis=1)
 
-# # # #reset transforms
+    # reset transforms 
     net.transforms['inputs'] = transform
     net.transforms['targets'] = param_transform
 
@@ -595,339 +555,233 @@ if predict == True:
     with open('/Users/astroai/Projects/FSPNet/predictions/preds_specific_'+pred_savename+'.pickle', 'wb') as file:
         pickle.dump(specific_data, file)
 
+else:
+    # loads predictions from saved pickle file
+    with open('/Users/astroai/Projects/FSPNet/predictions/preds1_'+pred_savename+'.pickle', 'rb') as file:
+            data1 =pickle.load(file)
+    with open('/Users/astroai/Projects/FSPNet/predictions/preds_'+pred_savename+'.pickle', 'rb') as file:
+            data = pickle.load(file)
+    with open('/Users/astroai/Projects/FSPNet/predictions/preds_specific_'+pred_savename+'.pickle', 'rb') as file:
+        specific_data = pickle.load(file)
 
-# # loads predictions from saved pickle file
-with open('/Users/astroai/Projects/FSPNet/predictions/preds1_'+pred_savename+'.pickle', 'rb') as file:
-        data1 =pickle.load(file)
-with open('/Users/astroai/Projects/FSPNet/predictions/preds_'+pred_savename+'.pickle', 'rb') as file:
-        data = pickle.load(file)
-with open('/Users/astroai/Projects/FSPNet/predictions/preds_specific_'+pred_savename+'.pickle', 'rb') as file:
-    specific_data = pickle.load(file)
+# loading in xspec MCMC predictions
+with open('/Users/astroai/Projects/FSPNet/predictions/xspec_preds1.pickle', 'rb') as file:
+    xspec_data_unordered = pickle.load(file)
 
-# # loading in xspec predictions
-# with open('/Users/astroai/Projects/FSPNet/xspec_predictions/predictions_0.pickle', 'rb') as file:
-#     xspec_data0 = pickle.load(file)
-# with open('/Users/astroai/Projects/FSPNet/xspec_predictions/predictions_1.pickle', 'rb') as file:
-#     xspec_data1 = pickle.load(file)
-# with open('/Users/astroai/Projects/FSPNet/xspec_predictions/predictions_2.pickle', 'rb') as file:
-#     xspec_data2 = pickle.load(file)
-# with open('/Users/astroai/Projects/FSPNet/xspec_predictions/predictions_3.pickle', 'rb') as file:
-#     xspec_data3 = pickle.load(file)
-# with open('/Users/astroai/Projects/FSPNet/xspec_predictions/predictions_4.pickle', 'rb') as file:
-#     xspec_data4 = pickle.load(file)
+    # note:
+    # xspec_preds is with default values and fitting with 1000 iterations before chain
+    # xspec_preds1 is with precalulated values and fitting with 1000 iterations before chain
 
-# # putting each dataset into one dictionary
-# xspec_data={
-#     'id': [],
-#     'xspec_recon': [],
-#     'true_posteriors': []
-# }
+    # note: shapes:
+    #   id: number of specific spectra (5)
+    #   object: number of specific spectra (5)
+    #   posteriors: number of specific spectra (5), number of parameters, number of samples
+    #   xspec_recon: number of specific spectra (5), 2 (indices: 0 is spectral energies, 1 is the spectra recontructions)
+    #   chain_time: number of specific spectra (5)
+
+# shows the order of the spectra - numbers corresponds to xspec_data and their position corresponds to specific_data
+xspec_indices = []
+for specific_object in specific_data['object']:
+    for i, xspec_object in enumerate(xspec_data_unordered['object']):
+        if specific_object==xspec_object:
+            xspec_indices.append(i)
+
+# making sure xspec_data order matches specific_data order
+xspec_data = {
+    'id': [xspec_data_unordered['id'][i] for i in xspec_indices],
+    'object': [xspec_data_unordered['object'][i] for i in xspec_indices],
+    'posteriors': [xspec_data_unordered['posteriors'][i] for i in xspec_indices],
+    'xspec_recon': [xspec_data_unordered['xspec_recon'][i] for i in xspec_indices],
+    'chain_time': [xspec_data_unordered['chain_time'][i] for i in xspec_indices]
+}
+
+# taking ~3000 randomly distributed data points from last half of the posterior samples
+new_posteriors = np.array([[random.sample(list(xspec_data['posteriors'] [spec_num][param_num][len(xspec_data['posteriors'][spec_num][param_num])//2:]), 3000) 
+                   for param_num in range(len(xspec_data['posteriors'][0]))] 
+                   for spec_num in range(len(xspec_data['posteriors']))])
+
+xspec_data['posteriors']=new_posteriors
 
 # xspec_data['id'] = np.stack((xspec_data0['id'], xspec_data1['id'], xspec_data2['id'], xspec_data3['id'], xspec_data4['id']), axis=0)   
-# # note: these lists are all different lengths so we keep as a list
-# xspec_data['xspec_recon'] = [xspec_data0['xspec_recon'], 
-#                              xspec_data1['xspec_recon'], 
-#                              xspec_data2['xspec_recon'], 
-#                              xspec_data3['xspec_recon'], 
-#                              xspec_data4['xspec_recon']]
-# # note: xspec_data['true_posteriors'] shape = number of spectra, number of parameters, number of samples
-# xspec_data['true_posteriors'] = np.stack((xspec_data0['true_posteriors'], xspec_data1['true_posteriors'], xspec_data2['true_posteriors'], xspec_data3['true_posteriors'], xspec_data4['true_posteriors']), axis=0)
+# # note: reconstruction lists are all different lengths so we keep as a list
+# xspec_data['xspec_recon'] = [xspec_data0['xspec_recon'], xspec_data1['xspec_recon'], xspec_data2['xspec_recon'], xspec_data3['xspec_recon'], xspec_data4['xspec_recon']]
+# # note: xspec_data['posteriors'] shape = number of spectra, number of parameters, number of samples
+# xspec_data['posteriors'] = np.stack((xspec_data0['posteriors'], xspec_data1['posteriors'], xspec_data2['posteriors'], xspec_data3['posteriors'], xspec_data4['posteriors']), axis=0)
 
-# # note: data['latent'].shape = 1080,1,5 = number of spectra, number of samples, number of parameters
-
-# separate_losses = net.separate_losses # shape (number of iterations ((dataset/batch)*epochs), number of loss terms)
+# gets losses from the seperate losses attribute of the net class
+separate_losses = net.separate_losses # shape (number of iterations ((dataset/batch)*epochs), number of loss terms)
 
 # # averaging loss over batch size
-# separate_losses['reconstruct'] = [np.mean(separate_losses['reconstruct'][i:i+len(e_loaders[0])], axis=0) for i in range(0, len(separate_losses['reconstruct']), len(e_loaders[0]))]
-# separate_losses['flow'] = [np.mean(separate_losses['flow'][i:i+len(e_loaders[0])], axis=0) for i in range(0, len(separate_losses['flow']), len(e_loaders[0]))]  
-# separate_losses['latent'] = [np.mean(separate_losses['latent'][i:i+len(e_loaders[0])], axis=0) for i in range(0, len(separate_losses['latent']), len(e_loaders[0]))]
-# separate_losses['bound'] = [np.mean(separate_losses['bound'][i:i+len(e_loaders[0])], axis=0) for i in range(0, len(separate_losses['bound']), len(e_loaders[0]))]
-# separate_losses['kl'] = [np.mean(separate_losses['kl'][i:i+len(e_loaders[0])], axis=0) for i in range(0, len(separate_losses['kl']), len(e_loaders[0]))]
+separate_losses['reconstruct'] = [np.mean(separate_losses['reconstruct'][i:i+len(e_loaders[0])], axis=0) for i in range(0, len(separate_losses['reconstruct']), len(e_loaders[0]))]
+separate_losses['flow'] = [np.mean(separate_losses['flow'][i:i+len(e_loaders[0])], axis=0) for i in range(0, len(separate_losses['flow']), len(e_loaders[0]))]  
+separate_losses['latent'] = [np.mean(separate_losses['latent'][i:i+len(e_loaders[0])], axis=0) for i in range(0, len(separate_losses['latent']), len(e_loaders[0]))]
+separate_losses['bound'] = [np.mean(separate_losses['bound'][i:i+len(e_loaders[0])], axis=0) for i in range(0, len(separate_losses['bound']), len(e_loaders[0]))]
+separate_losses['kl'] = [np.mean(separate_losses['kl'][i:i+len(e_loaders[0])], axis=0) for i in range(0, len(separate_losses['kl']), len(e_loaders[0]))]
 
 
 '''---------- PLOTTING PERFORMANCE ----------'''
 
 # autoencoder performance - remember to change part of net_init to include autoencoder and not encoder
-# plots.plot_performance(
-#     'Loss',
-#     net.losses[1][1:],
-#     plots_dir=plots_directory,
-#     train=net.losses[0][1:],
-#     save_name='NF_perfomance.png'
-# )
+plots.plot_performance(
+    'Loss',
+    net.losses[1][1:],
+    plots_dir=plots_directory,
+    train=net.losses[0][1:],
+    save_name='NF_perfomance.png'
+)
 
-# plot_performance_NF(
-#     'Loss',
-#     separate_losses,
-#     plots_dir=plots_directory,
-#     save_name='NF_allloss.png'
-# )
+performance_plot(
+    'Loss',
+    separate_losses,
+    plots_dir=plots_directory,
+    save_name='NF_allloss.png'
+)
 
-# # # decoder performance
-# plots.plot_performance(
-#     'Loss',
-#     decoder.losses[1][1:],
-#     plots_dir=plots_directory,
-#     train=decoder.losses[0][1:],
-#     save_name='NF_d_performance'
-# )
+# # decoder performance
+plots.plot_performance(
+    'Loss',
+    decoder.losses[1][1:],
+    plots_dir=plots_directory,
+    train=decoder.losses[0][1:],
+    save_name='NF_d_performance'
+)
 
-# # # plotting comparison between parametrs
-# comparison_plot_NF(
-#     data1,
-#     param_names,
-#     log_params,
-#     dir_name=plots_directory,
-#     specific_data=specific_data
-# )
+if plot_synthetic:
+    # plotting comparison between parametrs
+    comparison_plot(
+        data1,
+        dir_name=plots_directory,
+    )
+
+    all_param_samples = sample(data1,
+                            num_specs=3,
+                            num_samples=1,
+                            spec_scroll=SPEC_SCROLL)
+
+    # # single reconstructions using samples from all_param_samples
+    recon_plot(
+        decoder.net,
+        net,
+        dir_name = plots_directory+'reconstructions/',
+        data = data1,
+        all_param_samples = all_param_samples,
+        data_dir = '/Users/astroai/Projects/FSPNet/data/spectra.pickle', # for synthetic data,
+        spec_scroll=SPEC_SCROLL
+        )
+
+    # # posterior predictive plots using 500 samples per reconstruction
+    post_pred_samples = post_pred_plot(
+        decoder.net,
+        net,
+        dir_name = plots_directory+'reconstructions/',
+        data = data1,
+    )
+
+    # # latent space corner plot
+    latent_corner_plot(
+        dir_name = plots_directory+'distributions/',
+        data=data1,
+        )
+
+    # scatter plot across all parameters in dataset
+    param_pairs_plot(
+        data=data,
+        dir_name=plots_directory+'distributions/',
+    )
+
+elif plot_specific:
+     # # plotting comparison between parametrs
+    comparison_plot(
+        data1,
+        dir_name=plots_directory,
+        specific_data=specific_data
+    )
+
+    all_param_samples = sample(specific_data,
+                            num_specs=3,
+                            num_samples=1,
+                            spec_scroll=SPEC_SCROLL)
+
+    # # single reconstructions using samples from all_param_samples
+    recon_plot(
+        decoder.net,
+        net,
+        dir_name = plots_directory+'reconstructions/',
+        specific_data = specific_data,
+        data = data1,
+        all_param_samples = all_param_samples
+        )
+
+    # # posterior predictive plots using 500 samples per reconstruction
+    post_pred_samples = post_pred_plot(
+        decoder.net,
+        net,
+        dir_name = plots_directory+'reconstructions/',
+        data = data1,
+        specific_data = specific_data
+    )
+
+    # # latent space corner plot
+    latent_corner_plot(
+        dir_name = plots_directory+'distributions/',
+        specific_data = specific_data,
+        data=data1,
+        xspec_data=xspec_data
+        )
+
+    # scatter plot across all parameters in dataset
+    param_pairs_plot(
+        data=data,
+        dir_name=plots_directory+'distributions/',
+    )
+
+else:
+    # # plotting comparison between parametrs
+    comparison_plot(
+        data1,
+        dir_name=plots_directory,
+    )
+
+    all_param_samples = sample(data1,
+                            num_specs=3,
+                            num_samples=1,
+                            spec_scroll=SPEC_SCROLL)
+
+    # # single reconstructions using samples from all_param_samples
+    recon_plot(
+        decoder.net,
+        net,
+        dir_name = plots_directory+'reconstructions/',
+        data = data1,
+        all_param_samples = all_param_samples
+        )
+
+    # # posterior predictive plots using 500 samples per reconstruction
+    post_pred_samples = post_pred_plot(
+        decoder.net,
+        net,
+        dir_name = plots_directory+'reconstructions/',
+        data = data1,
+    )
+
+    # # latent space corner plot
+    latent_corner_plot(
+        dir_name = plots_directory+'distributions/',
+        data=data1,
+        )
+
+    # scatter plot across all parameters in dataset
+    param_pairs_plot(
+        data=data,
+        dir_name=plots_directory+'distributions/',
+    )
 
 
-# # # # plotting parameter distributions for specific spectra
-# all_param_samples = distribution_plot_NF(
-#     data=specific_data,
-#     param_names=param_names,
-#     log_params=log_params,
-#     dir_name=os.path.join(plots_directory,'distributions/'),
-#     xspec_data=xspec_data,
-#     specific_data=specific_data,
-# )
+'''---------- pyxspec tests ----------'''
 
+# xspec.Xset.chatter = 0
+# xspec.Xset.logChatter = 0
 
-# # # # single reconstructions using samples from all_param_samples
-# recon_plot_NF(
-#     data1,
-#     all_param_samples,
-#     decoder.net,
-#     net,
-#     dir_name=plots_directory+'reconstructions/',
-#     specific_data=specific_data
-# )
-
-# # # # # posterior predictive plots using 500 samples per reconstruction
-# post_pred_samples = post_pred_plot_NF(
-#     data1,
-#     decoder.net,
-#     net,
-#     dir_name=plots_directory+'reconstructions/',
-#     n_samples=500,
-#     specific_data=specific_data
-# )
-
-# # # latent space corner plot
-# corner_plot_latent_NF(
-#     data=data1,
-#     param_names=param_names,
-#     log_params=log_params,
-#     dir_name=plots_directory,
-#     xspec_data=xspec_data,
-#     specific_data=specific_data,
-#     in_param_samples=all_param_samples
-#     )
-
-# # # corner plot across all spectra
-# corner_plot_NF(
-#     data=data1,
-#     param_names=param_names,
-#     log_params=log_params,
-#     dir_name=plots_directory
-#     )
-
-
-
-# # distribution plots with samples taken for posterior predictive plots shown
-# distribution_plot_NF(
-#     data1,
-#     param_names,
-#     log_params,
-#     in_param_samples=post_pred_samples,
-#     dir_name=os.path.join(plots_directory,'distributions')
-# )
-
-# # latent space scatter plots
-# latent_space_scatter_NF(
-#     data1,
-#     log_params,
-#     param_names,
-#     dir_name=plots_directory,
-# )
-
-# # overall parameter distributions across many spectra
-# param_pair_plot_NF(
-#     data,
-#     log_params,
-#     param_names,
-#     dir_name=plots_directory
-# )
-
-# encoder performance - remember to change part of net_init to include encoder and not autoencoder
-# plots.plot_performance(
-#     'Loss',
-#     net.losses[1][1:],
-#     plots_dir=plots_directory,
-#     train=net.losses[0][1:],
-#     save_name='e_perfomance.png'
-# )
-
-# plotting parameter distributions for random spectra
-# all_param_samples = distribution_plot_NF(
-#     data1,
-#     param_names,
-#     log_params,
-#     dir_name=plots_directory,
-# )
-
-
-# get test_set from specific spectrum MCMC chain
-# net.net.checkpoints[-1].log_prob(data['targets']).mean()
-# npe.flow is 
-# npe_levels, npe_coverages = expected_coverage_mc(npe.flow, testset, device='cuda')
-
-'''--------- PLOTTING PARAMETER PAIRS ----------'''
-# param_pair_axes0 = plot_param_pairs(
-#     data=data1['latent'][0],
-#     plots_dir=plots_directory,
-#     save_name = 'latent_space_0',
-#     log_params=log_params,
-#     param_names=param_names,
-#     colour=plt.rcParams['axes.prop_cycle'].by_key()['color'][0],
-#     scatter_colour=plt.rcParams['axes.prop_cycle'].by_key()['color'][0],
-#     plot_hist=False
-# )
-
-# dist_targs = data1['targets'][0][0]
-# dist_targ_errs = data1['targets'][0][1]
-# targ_samples = [10**np.random.normal(loc=np.log10(targ), scale=(1/np.log(10))*(targ_err/targ), size=1000) if param_num in log_params
-#                         else np.random.normal(loc=targ, scale=targ_err, size=1000)
-#                         for param_num, (targ, targ_err) in enumerate(zip(dist_targs, dist_targ_errs))]
-# param_pair_data0=np.array(targ_samples)
-# ranges = [None] * param_pair_data0.shape[0]
-# # Plot scatter plots & histograms
-# for i, (axes_row, y_data, y_range) in enumerate(zip(param_pair_axes0, param_pair_data0, ranges)):
-#         for j, (axis, x_data, x_range) in enumerate(zip(axes_row, param_pair_data0, ranges)):
-#             # if i == j:
-#             #     _plot_histogram(x_data, axis, log=i in log_params, data_range=x_range, colour='grey')
-#             #     axis.tick_params(labelleft=False, left=False)
-#             if j < i:
-#                 axis.scatter(
-#                     x_data[:1000],
-#                     y_data[:1000],
-#                     s=20,
-#                     alpha=0.2,
-#                     color='grey'
-#                 )
-#             else:
-#                 axis.set_visible(False)
-# plt.savefig(plots_directory+'latent_space_0.png', dpi=600)
-
-# param_pair_axes1 = plot_param_pairs(
-#     data=data1['latent'][1],
-#     plots_dir=plots_directory,
-#     save_name = 'latent_space_1',
-#     log_params=log_params,
-#     param_names=param_names,
-#     colour=plt.rcParams['axes.prop_cycle'].by_key()['color'][1],
-#     scatter_colour=plt.rcParams['axes.prop_cycle'].by_key()['color'][1],
-#     plot_hist=False
-# )
-# dist_targs = data1['targets'][1][0]
-# dist_targ_errs = data1['targets'][1][1]
-# targ_samples = [10**np.random.normal(loc=np.log10(targ), scale=(1/np.log(10))*(targ_err/targ), size=1000) if param_num in log_params
-#                         else np.random.normal(loc=targ, scale=targ_err, size=1000)
-#                         for param_num, (targ, targ_err) in enumerate(zip(dist_targs, dist_targ_errs))]
-# param_pair_data1=np.array(targ_samples)
-# ranges = [None] * param_pair_data1.shape[0]
-# # Plot scatter plots & histograms
-# for i, (axes_row, y_data, y_range) in enumerate(zip(param_pair_axes1, param_pair_data1, ranges)):
-#         for j, (axis, x_data, x_range) in enumerate(zip(axes_row, param_pair_data1, ranges)):
-#             if i == j:
-#                 _plot_histogram(x_data, axis, log=i in log_params, data_range=x_range, colour='grey')
-#                 axis.tick_params(labelleft=False, left=False)
-#             elif j < i:
-#                 axis.scatter(
-#                     x_data[:1000],
-#                     y_data[:1000],
-#                     s=20,
-#                     alpha=0.2,
-#                     color='grey'
-#                 )
-#             else:
-#                 axis.set_visible(False)
-# plt.savefig(plots_directory+'latent_space_1.png', dpi=600)
-
-# param_pair_axes2 = plot_param_pairs(
-#     data=data1['latent'][2],
-#     plots_dir=plots_directory,
-#     save_name = 'latent_space_2',
-#     log_params=log_params,
-#     param_names=param_names,
-#     colour=plt.rcParams['axes.prop_cycle'].by_key()['color'][2],
-#     scatter_colour=plt.rcParams['axes.prop_cycle'].by_key()['color'][2],
-#     plot_hist=False
-# )
-# dist_targs = data1['targets'][2][0]
-# dist_targ_errs = data1['targets'][2][1]
-# targ_samples = [10**np.random.normal(loc=np.log10(targ), scale=(1/np.log(10))*(targ_err/targ), size=1000) if param_num in log_params
-#                         else np.random.normal(loc=targ, scale=targ_err, size=1000)
-#                         for param_num, (targ, targ_err) in enumerate(zip(dist_targs, dist_targ_errs))]
-# param_pair_data2=np.array(targ_samples)
-# ranges = [None] * param_pair_data2.shape[0]
-# # Plot scatter plots & histograms
-# for i, (axes_row, y_data, y_range) in enumerate(zip(param_pair_axes2, param_pair_data2, ranges)):
-#         for j, (axis, x_data, x_range) in enumerate(zip(axes_row, param_pair_data2, ranges)):
-#             if i == j:
-#                 _plot_histogram(x_data, axis, log=i in log_params, data_range=x_range, colour='grey')
-#                 axis.tick_params(labelleft=False, left=False)
-#             elif j < i:
-#                 axis.scatter(
-#                     x_data[:1000],
-#                     y_data[:1000],
-#                     s=20,
-#                     alpha=0.2,
-#                     color='grey'
-#                 )
-#             else:
-#                 axis.set_visible(False)
-# plt.savefig(plots_directory+'latent_space_2.png', dpi=600)
-
-# param_pair_axes = plot_param_pairs(
-#     data=np.array(data['targets'][:,0,:]),
-#     plots_dir=plots_directory,
-#     save_name='param_pair_plot',
-#     log_params=log_params,
-#     param_names=param_names,
-#     colour='#4cb555',
-#     scatter_colour='#4cb555',
-#     alpha=0.7,
-# )
-
-# # dist_targ_errs = data['targets'][:,1,:]
-# # targ_samples = [10**np.random.normal(loc=np.log10(targ), scale=(1/np.log(10))*(targ_err/targ), size=1000) if param_num in log_params
-# #                         else np.random.normal(loc=targ, scale=targ_err, size=1000)
-# #                         for param_num, (targ, targ_err) in enumerate(zip(dist_targs, dist_targ_errs))]
-# param_pair_data=np.squeeze(data['latent']).swapaxes(0,1)
-# ranges = [None] * param_pair_data.shape[0]
-# # Plot scatter plots & histograms
-# for i, (axes_row, y_data, y_range) in enumerate(zip(param_pair_axes, param_pair_data, ranges)):
-#         for j, (axis, x_data, x_range) in enumerate(zip(axes_row, param_pair_data, ranges)):
-#             if i == j:
-#                 _plot_histogram(x_data, axis, log=i in log_params, data_range=x_range, colour='#8445cc', alpha=0.5)
-#                 axis.tick_params(labelleft=False, left=False)
-#             elif j < i:
-#                 axis.scatter(
-#                     x_data[:1000],
-#                     y_data[:1000],
-#                     s=20,
-#                     alpha=0.2,
-#                     color='#8445cc'
-#                 )
-#             else:
-#                 axis.set_visible(False)
-
-# plt.savefig(plots_directory+'param_pair_plot.png', dpi=600)
-
-xspec.Xset.chatter = 0
-xspec.Xset.logChatter = 0
-
-data['latent'] = np.squeeze(data['latent'])
-data['targets'] = data['targets'][:,0,:]
-pyxspec_tests(data)
+# data['latent'] = np.squeeze(data['latent'])
+# data['targets'] = data['targets'][:,0,:]
+# pyxspec_tests(data)
