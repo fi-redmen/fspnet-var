@@ -17,8 +17,8 @@ from chainconsumer import Chain, ChainConsumer, PlotConfig, ChainConfig, Truth
 
 from fspnet.utils.plots import plot_param_pairs, _plot_histogram
 
-from plot_utils import get_energies, xspec_reconstruction, decoder_reconstruction, quantile_limits
-from misc_utils import sample
+from my_utils.plot_utils import get_energies, xspec_reconstruction, decoder_reconstruction, quantile_limits
+from my_utils.misc_utils import sample
 
 RECTANGLE: tuple[int, int] = (16, 9)
 MAJOR: int = 28
