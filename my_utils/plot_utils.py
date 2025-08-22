@@ -3,6 +3,7 @@ import numpy as np
 from astropy.io import fits
 import xspec
 import pickle
+import re
 
 import matplotlib.pyplot as plt
 from matplotlib.figure import FigureBase
@@ -189,7 +190,7 @@ def _binning(x_data: ndarray, bins: ndarray) -> tuple[ndarray, ndarray, ndarray]
     return x_bin
 
 def get_energies(
-    spectrum: str = 'js_ni0100320101_0mpu7_goddard_GTI0.jsgrp',
+    spectrum: str | None = 'js_ni0100320101_0mpu7_goddard_GTI0.jsgrp',
     data_dir: str | None = '/Users/astroai/Projects/FSPNet/data/spectra/'
 
 ):
@@ -212,7 +213,7 @@ def get_energies(
 def xspec_reconstruction(
     xspec_params: ndarray,
     spectrum: str | int,
-    data_dir: str = '/Users/astroai/Projects/FSPNet/data',
+    data_dir: str | None = '/Users/astroai/Projects/FSPNet/data/',
     ):
     
     """
@@ -236,11 +237,13 @@ def xspec_reconstruction(
     xspec.Xset.logChatter = 0
 
     # gets info from provided spectrum file
-    if type(spectrum) is str:
-        with fits.open(data_dir+ '/spectra/' + spectrum) as file:
+    if type(spectrum) is str or type(spectrum) is not int: # could maybe change to os.path_exists..??
+        data_dir+= 'spectra/'
+        with fits.open(data_dir+ spectrum) as file:
             spectrum_info = file[1].header
+
     else:
-        with open(data_dir+'/synth_spectra_clean.pickle', 'rb') as file:
+        with open(data_dir+'synth_spectra_clean.pickle', 'rb') as file:
             synthetic_data = pickle.load(file)
             spectrum_info = {
                 'RESPFILE': synthetic_data['info'][spectrum].response[5:],
@@ -248,9 +251,10 @@ def xspec_reconstruction(
                 'BACKFILE': synthetic_data['info'][spectrum].background[5:],
                 'EXPOSURE': synthetic_data['info'][spectrum].exposure
             }
-    
+
     # det_num = int(spectrum_info['RESPFILE'][7:9])
-    det_num=48
+    # det_num=48
+    det_num=int(re.search(r'_d(\d+)', spectrum_info['RESPFILE']).group(1))
 
     # fakeit settings
     fake_base = xspec.FakeitSettings(
@@ -264,9 +268,10 @@ def xspec_reconstruction(
 
     # creates list of xspec parameters - includes fixed values.
     xspec_params = list(np.concat([xspec_params[:3], [0.0, 100.0], xspec_params[3:]])) 
-    
+
     # settings for xspec
     xspec.AllModels.setEnergies("0.003  300. 1000 log")
+    # xspec.AllModels.setEnergies("0.001 1000. 1500 log")
     xspec.Plot.xAxis="keV"
     xspec.Plot.background = True
     xspec.AllModels.systematic = 0.
@@ -286,7 +291,7 @@ def xspec_reconstruction(
     # get data from plot
     xs_energies = xspec.Plot.x()
     xs_recon = np.array(xspec.Plot.y())/det_num
-    
+
     return xs_energies, xs_recon
 
 def decoder_reconstruction(
@@ -358,30 +363,22 @@ def quantile_limits(
                         x_min = np.max([np.min([np.quantile(all_data[i][:,left_plot_num], min_quant) for i in range(len(all_data))]),
                                         PARAM_LIMS[left_plot_num][0]])
 
-                        
                         x_max = np.min([np.max([np.quantile(all_data[i][:,left_plot_num], max_quant) for i in range(len(all_data))]),
                                         PARAM_LIMS[left_plot_num][1]])
+                        
+                        # y_min = np.min([np.quantile(all_data[i][:,bottom_plot_num], min_quant) for i in range(len(all_data))])
+                        
+                        # y_max = np.max([np.quantile(all_data[i][:,bottom_plot_num], max_quant) for i in range(len(all_data))])
 
-                        # y_max = np.min([np.max([np.quantile(np.array(NF_data)[:,bottom_plot_num], max_quant),
-                        #                 np.quantile(np.array(xspec_gauss_data)[:,bottom_plot_num], max_quant),
-                        #                 np.quantile(np.array(xspec_MCMC_data)[:,bottom_plot_num], max_quant)]),
-                        #                 PARAM_LIMS[bottom_plot_num][1]])
+                        # x_min = np.min([np.quantile(all_data[i][:,left_plot_num], min_quant) for i in range(len(all_data))])
 
-                        # x_min = np.max([np.min([np.quantile(np.array(NF_data)[:,left_plot_num], min_quant),
-                        #                 np.quantile(np.array(xspec_gauss_data)[:,left_plot_num], min_quant),
-                        #                 np.quantile(np.array(xspec_MCMC_data)[:,left_plot_num], min_quant)]),
-                        #                 PARAM_LIMS[left_plot_num][0]])
-
-                        # x_max = np.min([np.max([np.quantile(np.array(NF_data)[:,left_plot_num], max_quant),
-                        #                 np.quantile(np.array(xspec_gauss_data)[:,left_plot_num], max_quant),
-                        #                 np.quantile(np.array(xspec_MCMC_data)[:,left_plot_num], max_quant)]),
-                        #                 PARAM_LIMS[left_plot_num][1]])
+                        # x_max = np.max([np.quantile(all_data[i][:,left_plot_num], max_quant) for i in range(len(all_data))])
 
                         # # extra condition I made for MAXI J1535 - could maybe try to generalise this code..?
-                        if left_plot_num == 1 and object_name == 'MAXI J1535-571':
-                            x_max = 1.45
-                        if bottom_plot_num == 1 and object_name == 'MAXI J1535-571':
-                            y_max = 1.45
+                        # if left_plot_num == 1 and object_name == 'MAXI J1535-571':
+                        #     x_max = 1.45
+                        # if bottom_plot_num == 1 and object_name == 'MAXI J1535-571':
+                        #     y_max = 1.45
 
                         fig.axes[bottom_plot_num*5+left_plot_num].set_ylim(y_min, y_max)
                         fig.axes[bottom_plot_num*5+left_plot_num].set_xlim(x_min, x_max)
@@ -393,15 +390,9 @@ def quantile_limits(
                         x_max = np.min([np.max([np.quantile(all_data[i][:,bottom_plot_num], max_quant) for i in range(len(all_data))]),
                                         PARAM_LIMS[bottom_plot_num][1]])
 
-                        # x_min = np.max([np.min([np.quantile(np.array(NF_data)[:,left_plot_num], min_quant),
-                        #                 np.quantile(np.array(xspec_gauss_data)[:,left_plot_num], min_quant),
-                        #                 np.quantile(np.array(xspec_MCMC_data)[:,left_plot_num], min_quant)]),
-                        #                 PARAM_LIMS[left_plot_num][0]])
-
-                        # x_max = np.min([np.max([np.quantile(np.array(NF_data)[:,left_plot_num], max_quant),
-                        #                 np.quantile(np.array(xspec_gauss_data)[:,left_plot_num], max_quant),
-                        #                 np.quantile(np.array(xspec_MCMC_data)[:,left_plot_num], max_quant)]),
-                        #                 PARAM_LIMS[left_plot_num][1]])
+                        # x_min = np.min([np.quantile(all_data[i][:,bottom_plot_num], min_quant) for i in range(len(all_data))])
+                        
+                        # x_max = np.max([np.quantile(all_data[i][:,bottom_plot_num], max_quant) for i in range(len(all_data))])
 
                         if left_plot_num == 1 and object_name == 'MAXI J1535-571':
                             x_max = 1.45

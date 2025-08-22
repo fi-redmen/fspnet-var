@@ -1,5 +1,8 @@
 import numpy as np
 from numpy import ndarray
+import xspec
+import os
+from astropy.io import fits
 
 PARAM_LIMS: ndarray = np.array([[5.0e-3,75],[1.3,4],[1.0e-3,1],[2.5e-2, 4],[1.0e-2, 1.0e+10]])
 
@@ -27,7 +30,6 @@ def sample(
         - Shape: spectrum number, sample number, parameter number
     '''
 
-    # g
     all_samples = []
     for spec_num in range(spec_scroll,num_specs+spec_scroll):
         # gets num_samples sets of parameter samples from dist_lats
@@ -48,3 +50,44 @@ def sample(
         all_samples.append(samples)
 
     return all_samples
+
+def reduced_PG(
+    params,
+    spec_name,
+    param_limits: ndarray = PARAM_LIMS,
+    data_dir = '/Users/astroai/Projects/FSPNet/data/spectra/'
+    ):
+
+    # params = [2.0, 2.5, 2.0e-2, 1.0, 1.0]  # Example parameters for the model
+
+    os.chdir(data_dir)
+
+    # with fits.open(spec_name) as file:
+    #     spectrum_info = file[1].header
+
+    xspec.Xset.chatter = 0
+    xspec.Xset.logChatter = 0
+
+    # Load spectrum and model
+    xspec.Spectrum(spec_name)
+    xspec.AllModels.lmod("simplcutx", "/Users/astroai/Downloads/simplcutx/")
+
+    # settings for xspec
+    xspec.AllModels.setEnergies("0.003  300. 1000 log")
+    xspec.Plot.xAxis="keV"
+    xspec.Plot.background = True
+    xspec.AllModels.systematic = 0.
+    xspec.Fit.statMethod = 'pgstat'
+    xspec.Xset.abund = "wilm"
+
+    # make reconstruction from model
+    xspec_model = xspec.Model("tbabs(simplcutx(ezdiskbb))")
+    xspec_model.setPars(list(np.concat([params[:3], [0.0, 100.0], params[3:]])) )
+    xspec.AllData.ignore("**-0.3 10.0-**")
+
+    value = xspec.Fit.statistic / xspec.Fit.dof
+
+    xspec.AllData.clear()
+    xspec.AllModels.clear()
+
+    return value
