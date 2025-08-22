@@ -46,7 +46,7 @@ def gaussian_loss(predictions, target):
 
 # MSE loss for variational autoencoder
 def mse_loss(predictions, target):
-    return nn.MSELoss()(predictions[:,0], target[:,0]) #(spectra))(B,240)
+    return nn.MSELoss()(predictions[:,0], target[:,0]) #(spectra:(B,240), parameters:(B,5))
 
 class TestDataset(torch.utils.data.Dataset):
     """
@@ -186,10 +186,10 @@ def net_init(
         # )
 
         # chooses to train NF_autoencoder
-        net = nets.Autoencoder(
+        net = Vautoencoder(
             e_save_num,
             states_dir,
-            AutoencoderNet(net, decoder.net, name=encoder_name),
+            VautoencoderNetwork(net, decoder.net, name=encoder_name),
             learning_rate=learning_rate,
             description=description,
             verbose='epoch',
@@ -212,8 +212,8 @@ def net_init(
         net.latent_func = mse_loss              #adds latent loss as mse
 
         net.latent_loss = 1 #3.0e-1
-        net.reconstruct_loss = 1e-3 #4.0e-1
-        net.kl_loss = 1e-1 #
+        net.reconstruct_loss = 1 #4.0e-1
+        net.kl_loss = 1 #
         net.bound_loss = 0 # 3e-1 
 
         net.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau( #included scheduler to implement minimum learning rate
@@ -230,26 +230,11 @@ def net_init(
             uncertainty=dataset.uncertainty,
         )
 
-        # for fake spectra
-        # dataset = transform(
-        #     dataset)
-
-        # for without uncertainties
-        # dataset.spectra = transform(dataset.spectra)
-
         # # for with uncertainties
         dataset.params, dataset.param_uncertainty = param_transform(
             dataset.params,
             uncertainty=dataset. param_uncertainty,
         )
-
-        # for fake spectra
-        # dataset = param_transform(
-        #     datasets
-        # )
-
-        # for without uncertainties
-        # dataset.params = param_transform(dataset.params)
 
     return decoder.to(device), net.to(device)
     '''
@@ -301,158 +286,109 @@ def init(config: dict | str = './config.yaml') -> tuple[
     decoder.idxs = d_dataset.idxs
     
     return e_dataset, d_dataset, e_loaders, d_loaders, decoder, net
-    # added e_dataset, d_dataset changed. put this function into code
-    # do the same with net_init - so you dont have to untransfrom and retransform
 
-    # for fake dataset:
-    # dataset = TestDataset((1,1,240))
-    # decoder, net = net_init((dataset, dataset), config)
 
-    # loader = DataLoader(dataset, batch_size=60, shuffle=False)
-
-    # net.idxs = dataset.idxs
-    # decoder.idxs = dataset.idxs
-
-    # return dataset, dataset, (loader, loader), (loader, loader), decoder, net
-
-# class Vautoencoder(nets.Autoencoder):
-#     def __init__(self, save_num, states_dir, net, mix_precision = False, learning_rate = 0.001, description = '', verbose = 'epoch', transform = None, latent_transform = None, in_transform = None):
-#         super().__init__(save_num, states_dir, net, mix_precision, learning_rate, description, verbose, transform, latent_transform, in_transform)
-#         self.flowlossweight = 0.0
-#         self.separate_losses = {
-#             'reconstruct': [],
-#             'flow': [],
-#             'latent': [],
-#             'bound': [],
-#             'kl': []
-#         }
+class Vautoencoder(nets.Autoencoder):
+    def __init__(self, save_num, states_dir, net, mix_precision = False, learning_rate = 0.001, description = '', verbose = 'epoch', transform = None, latent_transform = None, in_transform = None):
+        super().__init__(save_num, states_dir, net, mix_precision, learning_rate, description, verbose, transform, latent_transform, in_transform)
+        self.flowlossweight = 0.0
+        self.separate_losses = {
+            'reconstruct': [],
+            'flow': [],
+            'latent': [],
+            'bound': [],
+            'kl': []
+        }
     
-#     def __getstate__(self) -> dict[str, Any]:
-#         return super().__getstate__() | {
-#             'flowlossweight': self.flowlossweight,
-#             'separate_losses': self.separate_losses
-#         }
+    def __getstate__(self) -> dict[str, Any]:
+        return super().__getstate__() | {
+            'flowlossweight': self.flowlossweight,
+            'separate_losses': self.separate_losses
+        }
     
-#     def __setstate__(self, state: dict[str, Any]) -> None:
-#         super().__setstate__(state)
-#         self.flowlossweight = state['flowlossweight']
-#         self.separate_losses = state['separate_losses']
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        super().__setstate__(state)
+        self.flowlossweight = state['flowlossweight']
+        self.separate_losses = state['separate_losses']
 
-#     def _loss(self, in_data: Tensor, target: Tensor) -> float:
-#         """
-#         Calculates the loss from the autoencoder's predictions
+    def _loss(self, in_data: Tensor, target: Tensor) -> float:
+        """
+        Calculates the loss from the autoencoder's predictions
 
-#         Parameters
-#         ----------
-#         in_data : (N,...) Tensor
-#             Input high dimensional data of batch size N and the remaining dimensions depend on the
-#             network used
-#         target : (N,...) Tensor
-#             Latent target low dimensional data of batch size N and the remaining dimensions depend
-#             on the network used
+        Parameters
+        ----------
+        in_data : (N,...) Tensor
+            Input high dimensional data of batch size N and the remaining dimensions depend on the
+            network used
+        target : (N,...) Tensor
+            Latent target low dimensional data of batch size N and the remaining dimensions depend
+            on the network used
 
-#         Returns
-#         -------
-#         float
-#             Loss from the autoencoder's predictions'
-#         """
-#         loss: Tensor
-#         latent: Tensor | None = None
-#         bounds: Tensor = torch.tensor([0., 1.]).to(self._device)
-#         output: Tensor = self.net(in_data) #,target (for inheriting class)
+        Returns
+        -------
+        float
+            Loss from the autoencoder's predictions'
+        """
+        loss: Tensor
+        latent: Tensor | None = None
+        bounds: Tensor = torch.tensor([0., 1.]).to(self._device)
+        output: Tensor = self.net(in_data) #,target (for inheriting class)
 
-#         separate_loss = []
+        separate_loss = []
 
-#         if self.net.checkpoints:
-#             latent = self.net.checkpoints[-1].sample([1])[0]
+        if self.net.checkpoints:
+            latent = self.net.checkpoints[-1][:,0]
         
-#         # Define a dictionary for loss components
-#         loss_components = {
-#             'reconstruct': self.reconstruct_loss * self.reconstruct_func(output, in_data),
-#             'flow': -1 * self.flowlossweight * self.net.checkpoints[-1].log_prob(target).mean() if self.flowlossweight else None,
-#             'latent': self.latent_loss * self.latent_func(latent, target) if self.latent_loss and latent is not None else None,
-#             'bound': self.bound_loss * torch.mean(torch.cat((
-#                 (bounds[0] - latent) ** 2 * (latent < bounds[0]),
-#                 (latent - bounds[1]) ** 2 * (latent > bounds[1]),
-#             ))) if self.bound_loss and latent is not None else None,
-#             'kl': self.kl_loss * self.net.kl_loss if self.kl_loss else None,
-#         }
+        # Define a dictionary for loss components
+        loss_components = {
+            'reconstruct': self.reconstruct_loss * self.reconstruct_func(output, in_data),
+            'flow': -1 * self.flowlossweight * self.net.checkpoints[-1].log_prob(target).mean() if self.flowlossweight else None,
+            'latent': self.latent_loss * self.latent_func(latent, target) if self.latent_loss and latent is not None else None,
+            'bound': self.bound_loss * torch.mean(torch.cat((
+                (bounds[0] - latent) ** 2 * (latent < bounds[0]),
+                (latent - bounds[1]) ** 2 * (latent > bounds[1]),
+            ))) if self.bound_loss and latent is not None else None,
+            'kl': self.kl_loss * self.net.kl_loss if self.kl_loss else None,
+        }
 
-#         # Iterate through the dictionary to process each loss component
-#         separate_loss = []
-#         for key, loss_value in loss_components.items():
-#             if loss_value is not None:  # Only process non-None losses
-#                 separate_loss.append(loss_value)
-#                 if self._train_state:
-#                     self.separate_losses[key].append(loss_value.clone().item())
+        # Iterate through the dictionary to process each loss component
+        separate_loss = []
+        for key, loss_value in loss_components.items():
+            if loss_value is not None:  # Only process non-None losses
+                separate_loss.append(loss_value)
+                if self._train_state:
+                    self.separate_losses[key].append(loss_value.clone().item())
 
-#         # Compute the total loss
-#         loss = torch.sum(torch.stack(separate_loss))
+        # Compute the total loss
+        loss = torch.sum(torch.stack(separate_loss))
 
-#         self._update(loss)
-#         return loss.item()
-    
-#     def batch_predict(self, data: Tensor, **_: Any) -> tuple[ndarray, ...]:
-#         """
-#         Generates predictions for the given data batch
-
-#         Parameters
-#         ----------
-#         data : (N,...) Tensor
-#             N data to generate predictions for
-
-#         Returns
-#         -------
-#         tuple[(N,...) ndarray, ...]
-#             N predictions for the given data
-#         """
-#         # for nonvariational wihtout uncertainties??
-#         return (
-#             self.net(data).detach().cpu().numpy(),
-#             self.net.checkpoints[-1].detach().cpu().numpy(),
-#             data.detach().cpu().numpy(),
-#         )
-    
-#         # for non variational without uncertainties??:
-#         # return (
-#         #     self.net(data).detach().cpu().numpy(),
-#         #     self.net[0].detach().cpu().numpy(),
-#         #     data.detach().cpu().numpy(),
-#         # )
+        self._update(loss)
+        return loss.item()
 
 
+class VautoencoderNetwork(AutoencoderNet):
+    def forward(self, x: torch.Tensor) -> torch.Tensor: # add ,target_uncertainty to arguments
+        """
+        Forward pass of the autoencoder
 
-# class VautoencoderNetwork(AutoencoderNet):
-#     def forward(self, x: torch.Tensor) -> torch.Tensor: # add ,target_uncertainty to arguments
-#         """
-#         Forward pass of the autoencoder
+        Parameters
+        ----------
+        x : (N,...) list[Tensor] | Tensor
+            Input tensor(s) with batch size N
 
-#         Parameters
-#         ----------
-#         x : (N,...) list[Tensor] | Tensor
-#             Input tensor(s) with batch size N
+        Returns
+        -------
+        (N,...) list[Tensor] | Tensor
+            Output tensor from the network
+        """
+        x = self.net[0](x)
+        self.checkpoints.append((self.net[0].checkpoints[-1].clone()))
 
-#         Returns
-#         -------
-#         (N,...) list[Tensor] | Tensor
-#             Output tensor from the network
-#         """
+        if hasattr(self.net[0], 'kl_loss'):
+            self.kl_loss = self.net[0].kl_loss
 
-#         x = self.net[0](x)
-#         self.checkpoints.append(x.clone())
-
-#         # x = self.net[0](x)
-#         # self.checkpoints.append(x)
-#         # x = x.sample([1])
-#         # x = x[0]
-
-#         if hasattr(self.net[0], 'kl_loss'): 
-#             self.kl_loss = self.net[0].kl_loss
-
-#         # return self.net[1](torch.cat((x, self.net[0].checkpoints[-1][:,-1:]), dim=1))     #for variational - when we want mu and sigma from checkpoint layer in encoder
-#         self.net[1](torch.cat((x, self.net[0].checkpoints[-1][:,-1:]), dim=1))
-#         return self.net[1](x)
-
+        # return self.net[1](torch.cat((x, self.net[0].checkpoints[-1][:,-1:]), dim=1))     #for variational 
+        return self.net[1](x)
 
 '''shows what the data file looks like
 with open('./data/spectra.pickle', 'rb') as file:
@@ -497,21 +433,14 @@ os.makedirs(plots_directory+'distributions/', exist_ok=True)
 decoder.training(num_epochs, d_loaders) 
 
 # #fix decoder's weights so they dont change while training the encoder
-# net.net.net[1].requires_grad_(False)
+net.net.net[1].requires_grad_(False)
 
 #setting up autoencoder optimiser correctly - likely to not be needed
 net.optimiser = optim.AdamW(net.net.parameters(), lr=learning_rate)
-net.scheduler = optim.lr_scheduler.ReduceLROnPlateau(net.optimiser, factor=0.5, min_lr=1e-6,)
+net.scheduler = optim.lr_scheduler.ReduceLROnPlateau(net.optimiser, factor=0.5, min_lr=1e-9,)
 
 # train autoencoder
 net.training(num_epochs, e_loaders)
-
-# for training outputs
-# net.training(101, e_loaders)
-# directory+="e_training/"
-# for validation outputs
-# net.training(1, e_loaders)
-# directory+="e_validation/"
 
 # save transforms
 transform = net.transforms['inputs']
@@ -522,17 +451,98 @@ net.transforms['targets'] = None
 
 #--- making predictions with manually transforming data ---# -- for VAE
 # # predict 
-data = net.predict(e_loaders[-1], path='./predictions/prediction')
-d_data = decoder.predict(d_loaders[-1])
+data = net.predict(e_loaders[-1], path='./predictions/prediction', input_=True)
+names = ['js_ni0100320101_0mpu7_goddard_GTI0.jsgrp', 
+            'js_ni0103010102_0mpu7_goddard_GTI0.jsgrp',
+            'js_ni1014010102_0mpu7_goddard_GTI30.jsgrp',
+            'js_ni1050360115_0mpu7_goddard_GTI9.jsgrp',
+            'js_ni1100320119_0mpu7_goddard_GTI26.jsgrp']
+object_names=['Cyg X-1 (2017)',
+              'GRS 1915+105',
+              'LMC X-3',
+              'MAXI J1535-571',
+              'Cyg X-1 (2018)']
+train_data = net.predict(e_loaders[0], num_samples=1000, input_=True)
+val_data = net.predict(e_loaders[1], num_samples=1000, input_=True)
+train_idxs = np.isin(train_data['ids'], names)
+val_idxs = np.isin(val_data['ids'], names)
+# # Then with the idxs, you can get the posteriors (or whatever else you want from the predicitons) by:
+targets = np.concat((train_data['targets'][train_idxs],val_data['targets'][val_idxs]), axis=0)
+latent = np.concat((train_data['latent'][train_idxs],val_data['latent'][val_idxs]), axis=0)
+inputs = np.concat((train_data['inputs'][train_idxs], val_data['inputs'][val_idxs]), axis=0)
+preds = np.concat((train_data['preds'][train_idxs], val_data['preds'][val_idxs]), axis=0)
+names = np.concat((train_data['ids'][train_idxs], val_data['ids'][val_idxs]), axis=0)
+
+name_to_object = dict(zip(names, object_names))
+new_object_names = [name_to_object[name] for name in names]
+
+specific_data = {
+    'id': names,
+    'targets': targets,
+    'latent': latent,
+    'inputs': inputs,
+    'preds': preds,
+    'object': object_names
+}
+
+# d_data = decoder.predict(d_loaders[-1], input_=True)
 # untransforms and stacks uncertainties
-data['targets'] = np.stack(param_transform(data['targets'][:,0], back=True, 
-                           uncertainties=data['targets'][:,1]), axis=1)
+param_uncertainties = e_dataset.param_uncertainty[np.isin(e_dataset.names, data['ids'])]
+specific_param_uncertainties = e_dataset.param_uncertainty[np.isin(e_dataset.names, specific_data['id'])]
+
+specific_param_uncertainties = []
+for i in range(len(specific_data['id'])):
+    specific_param_uncertainties.append(e_dataset.param_uncertainty[np.isin(e_dataset.names, specific_data['id'][i])])
+specific_param_uncertainties = np.squeeze(np.array(specific_param_uncertainties))
+
+data['targets'] = np.stack(param_transform(data['targets'], back=True, 
+                           uncertainty=param_uncertainties), axis=1)
 data['inputs'] = np.stack(transform(data['inputs'][:,0], back=True,
                                            uncertainty=data['inputs'][:,1]), axis=1)
+specific_data['targets'] = np.stack(param_transform(specific_data['targets'], back=True,
+                                                uncertainty=specific_param_uncertainties), axis=1)
+specific_data['inputs'] = np.stack(transform(specific_data['inputs'][:,0], back=True,
+                                                uncertainty=specific_data['inputs'][:,1]), axis=1)
+
 #reset transforms
 net.transforms['inputs'] = transform
 net.transforms['targets'] = param_transform
 
+# getting 1000 samples from Gaussian distribution - so I can use NF plots
+data1 = data.copy()
+data1['latent']=np.zeros((1080,5000,5))
+for spec_num,_  in enumerate(data['targets']):
+    latent_mu = data['latent'][spec_num][0]
+    latent_sig = data['latent'][spec_num][1]
+    dist_samples = np.array([
+        np.random.normal(loc=mu, scale=abs(err), size=5000) 
+        for mu, err in zip(latent_mu, latent_sig)]).swapaxes(0,1)
+
+    # cut_indices = [np.argwhere((dist_sample<=0)) for dist_sample in dist_samples] 
+    # new_dist_samples = []
+    # for dist_sample in dist_samples:
+    #     if dist_sample.any()>0:
+    #         new_dist_samples.append(dist_sample)
+    # dist_samples = [ds for ds in dist_samples if ds.any() > 0]
+
+    data1['latent'][spec_num] = np.array(dist_samples)
+    # dist_samples = [np.delete(dist_sample) for dist_sample, cut_index in zip(dist_samples, cut_indices)]
+
+# getting 1000 samples from Gaussian distribution - so I can use nice NF plots
+specific_data_copy = specific_data.copy()
+specific_data_copy['latent']=np.zeros((1080,5000,5))
+for spec_num,_  in enumerate(specific_data['targets']):
+    latent_mu = specific_data['latent'][spec_num][0]
+    latent_sig = specific_data['latent'][spec_num][1]
+    specific_dist_samples = np.array([
+        np.random.normal(loc=mu, scale=abs(err), size=5000) 
+        for mu, err in zip(latent_mu, latent_sig)]).swapaxes(0,1)
+    # cut_indices = [np.argwhere((dist_sample<=0)) for dist_sample in specific_dist_samples] 
+    # specific_dist = [np.delete(dist_sample, cut_index) for dist_sample, cut_index in zip(specific_dist_samples, cut_indices)]
+    # specific_dist_samples = [ds for ds in specific_dist_samples if ds.any() > 0]
+    specific_data_copy['latent'][spec_num] = np.array(specific_dist_samples)
+
+specific_data = specific_data_copy.copy()
 
 # # # # saves predictions to pickle file TRANSFORMED PARAM_UNCERTAINTIES
 # with open('/Users/astroai/Projects/FSPNet/predictions/preds1_'+pred_savename+'.pickle', 'wb') as file:
@@ -574,109 +584,120 @@ net.transforms['targets'] = param_transform
 
 # # note: data['latent'].shape = 1080,1,5 = number of spectra, number of samples, number of parameters
 
+separate_losses = net.separate_losses # shape (number of iterations ((dataset/batch)*epochs), number of loss terms)
+# averaging loss over batch size
+# separate_losses = [np.mean(separate_losses[i:i+len(e_loaders[0])], axis=0) for i in range(0, len(separate_losses), len(e_loaders[0]))]
 
-# separate_losses = net.separate_losses # shape (number of iterations ((dataset/batch)*epochs), number of loss terms)
-# # averaging loss over batch size
-# # separate_losses = [np.mean(separate_losses[i:i+len(e_loaders[0])], axis=0) for i in range(0, len(separate_losses), len(e_loaders[0]))]
-
-# separate_losses['reconstruct'] = [np.mean(separate_losses['reconstruct'][i:i+len(e_loaders[0])], axis=0) for i in range(0, len(separate_losses['reconstruct']), len(e_loaders[0]))]
-# separate_losses['flow'] = [np.mean(separate_losses['flow'][i:i+len(e_loaders[0])], axis=0) for i in range(0, len(separate_losses['flow']), len(e_loaders[0]))]  
-# separate_losses['latent'] = [np.mean(separate_losses['latent'][i:i+len(e_loaders[0])], axis=0) for i in range(0, len(separate_losses['latent']), len(e_loaders[0]))]
-# separate_losses['bound'] = [np.mean(separate_losses['bound'][i:i+len(e_loaders[0])], axis=0) for i in range(0, len(separate_losses['bound']), len(e_loaders[0]))]
-# separate_losses['kl'] = [np.mean(separate_losses['kl'][i:i+len(e_loaders[0])], axis=0) for i in range(0, len(separate_losses['kl']), len(e_loaders[0]))]
-
+separate_losses['reconstruct'] = [np.mean(separate_losses['reconstruct'][i:i+len(e_loaders[0])], axis=0) for i in range(0, len(separate_losses['reconstruct']), len(e_loaders[0]))]
+separate_losses['flow'] = [np.mean(separate_losses['flow'][i:i+len(e_loaders[0])], axis=0) for i in range(0, len(separate_losses['flow']), len(e_loaders[0]))]  
+separate_losses['latent'] = [np.mean(separate_losses['latent'][i:i+len(e_loaders[0])], axis=0) for i in range(0, len(separate_losses['latent']), len(e_loaders[0]))]
+separate_losses['bound'] = [np.mean(separate_losses['bound'][i:i+len(e_loaders[0])], axis=0) for i in range(0, len(separate_losses['bound']), len(e_loaders[0]))]
+separate_losses['kl'] = [np.mean(separate_losses['kl'][i:i+len(e_loaders[0])], axis=0) for i in range(0, len(separate_losses['kl']), len(e_loaders[0]))]
 
 
 '''---------- PLOTTING PERFORMANCE ----------'''
 
 # autoencoder performance - remember to change part of net_init to include autoencoder and not encoder
-# plots.plot_performance(
-#     'Loss',
-#     net.losses[1][1:],
-#     plots_dir=plots_directory,
-#     train=net.losses[0][1:],
-#     save_name='NF_perfomance.png'
-# )
+plots.plot_performance(
+    'Loss',
+    net.losses[1][1:],
+    plots_dir=plots_directory,
+    train=net.losses[0][1:],
+    save_name='NF_perfomance.png'
+)
 
-# plot_performance_NF(
-#     'Loss',
-#     separate_losses,
-#     plots_dir=plots_directory,
-#     save_name='NF_allloss.png'
-# )
+plot_performance_NF(
+    'Loss',
+    separate_losses,
+    plots_dir=plots_directory,
+    save_name='NF_allloss.png'
+)
 
-# # # decoder performance
-# plots.plot_performance(
-#     'Loss',
-#     decoder.losses[1][1:],
-#     plots_dir=plots_directory,
-#     train=decoder.losses[0][1:],
-#     save_name='NF_d_performance'
-# )
+# # decoder performance
+plots.plot_performance(
+    'Loss',
+    decoder.losses[1][1:],
+    plots_dir=plots_directory,
+    train=decoder.losses[0][1:],
+    save_name='NF_d_performance'
+)
 
-# # # plotting comparison between parametrs
-# comparison_plot_NF(
-#     data1,
-#     param_names,
-#     log_params,
-#     dir_name=plots_directory,
-#     specific_data=specific_data
-# )
+# # plotting comparison between parametrs
+comparison_plot_NF(
+    data1,
+    param_names,
+    log_params,
+    dir_name=plots_directory,
+    specific_data=specific_data,
+
+)
 
 
-# # # # plotting parameter distributions for specific spectra
+# # # plotting parameter distributions for specific spectra
 # all_param_samples = distribution_plot_NF(
 #     data=specific_data,
 #     param_names=param_names,
 #     log_params=log_params,
 #     dir_name=os.path.join(plots_directory,'distributions/'),
-#     xspec_data=xspec_data,
 #     specific_data=specific_data,
 # )
+# to get all_param_samples when we arent doing plot_distribution - shouldve made this a separate function and not put inside distribution plots
+all_param_samples = []
+for spec_num in range(len(specific_data['targets'].swapaxes(1,2).swapaxes(0,1))):
+
+    dist_targs = specific_data['targets'][spec_num][0]
+    dist_targ_errs = specific_data['targets'][spec_num][1]
+    dist_lats = specific_data['latent'][spec_num]
+    spec_name = specific_data['id'][spec_num]
+
+    param_samples=[]
+    indexes = np.random.randint(0, len(dist_lats[1]), size=1)
+    for i in indexes:
+            param_samples.append(dist_lats[i])
+    all_param_samples.append(param_samples)
 
 
-# # # # single reconstructions using samples from all_param_samples
-# recon_plot_NF(
-#     data1,
-#     all_param_samples,
-#     decoder.net,
-#     net,
-#     dir_name=plots_directory+'reconstructions/',
-#     specific_data=specific_data
-# )
+# # # single reconstructions using samples from all_param_samples
+recon_plot_NF(
+    data1,
+    all_param_samples,
+    decoder.net,
+    net,
+    dir_name=plots_directory+'reconstructions/',
+    specific_data=specific_data
+)
 
-# # # # # posterior predictive plots using 500 samples per reconstruction
-# post_pred_samples = post_pred_plot_NF(
-#     data1,
-#     decoder.net,
-#     net,
-#     dir_name=plots_directory+'reconstructions/',
-#     n_samples=500,
-#     specific_data=specific_data
-# )
+# # # # posterior predictive plots using 500 samples per reconstruction
+post_pred_samples = post_pred_plot_NF(
+    data1,
+    decoder.net,
+    net,
+    dir_name=plots_directory+'reconstructions/',
+    n_samples=500,
+    specific_data=specific_data
+)
 
-# # # latent space corner plot
-# corner_plot_latent_NF(
-#     data=data1,
-#     param_names=param_names,
-#     log_params=log_params,
-#     dir_name=plots_directory,
-#     xspec_data=xspec_data,
-#     specific_data=specific_data,
-#     in_param_samples=all_param_samples
-#     )
+# # latent space corner plot
+corner_plot_latent_NF(
+    data=data1,
+    param_names=param_names,
+    log_params=log_params,
+    dir_name=plots_directory,
+    specific_data=specific_data,
+    in_param_samples=all_param_samples
+    )
 
-# # # corner plot across all spectra
-# corner_plot_NF(
-#     data=data1,
-#     param_names=param_names,
-#     log_params=log_params,
-#     dir_name=plots_directory
-#     )
-
+# # corner plot across all spectra
+corner_plot_NF(
+    data=data1,
+    param_names=param_names,
+    log_params=log_params,
+    dir_name=plots_directory
+    )
 
 
-# # distribution plots with samples taken for posterior predictive plots shown
+
+# distribution plots with samples taken for posterior predictive plots shown
 # distribution_plot_NF(
 #     data1,
 #     param_names,
@@ -867,9 +888,9 @@ net.transforms['targets'] = param_transform
 
 # plt.savefig(plots_directory+'param_pair_plot.png', dpi=600)
 
-xspec.Xset.chatter = 0
-xspec.Xset.logChatter = 0
+# xspec.Xset.chatter = 0
+# xspec.Xset.logChatter = 0
 
-data['latent'] = np.squeeze(data['latent'])
-data['targets'] = data['targets'][:,0,:]
-pyxspec_tests(data)
+# data['latent'] = data['latent'][:,0,:] #np.squeeze(data['latent'])
+# data['targets'] = data['targets'][:,0,:]
+# pyxspec_tests(data)

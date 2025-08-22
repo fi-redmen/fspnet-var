@@ -15,6 +15,8 @@ from netloader.utils.utils import save_name, get_device
 from torch.utils.data import DataLoader
 from torch import nn, optim, Tensor
 from numpy import ndarray
+import time
+import lampe
 
 from fspnet.utils import plots
 from fspnet.utils.utils import open_config
@@ -23,9 +25,11 @@ from fspnet.spectrum_fit import pyxspec_tests
 
 import matplotlib.pyplot as plt
 
-from VAE_plots import comparison_plot, recon_plot, post_pred_plot, latent_corner_plot, rec_2d_plot, param_pairs_plot
-from VAE_plots import performance_plot
+from VAE_plots import comparison_plot, recon_plot, post_pred_plot, latent_corner_plot, rec_2d_plot, param_pairs_plot 
+from VAE_plots import performance_plot, post_pred_plot_xspec, coverage_plot
 from my_utils.misc_utils import sample
+
+# from netloader.layers.flows
 
 plt.style.use(["science", "grid", 'no-latex'])
 
@@ -90,7 +94,7 @@ def net_init(
         ])
         transform.transforms.append(transforms.Normalise(
             data=transform(datasets[1].spectra),
-            mean=False,
+            mean=False
         ))
 
         param_transform = transforms.MultiTransform([
@@ -99,7 +103,7 @@ def net_init(
             transforms.Log(idxs=log_params),
         ])
         param_transform.transforms.append(transforms.Normalise(
-            param_transform(datasets[1].params), #
+            data=param_transform(datasets[1].params),
             dim=0,
         ))
 
@@ -339,7 +343,7 @@ class NFautoencoder(nets.Autoencoder):
             if loss_value is not None:  # Only process non-None losses
                 separate_loss.append(loss_value)
                 if self._train_state:
-                    self.separate_losses[key].append(loss_value.clone().item())
+                    self.separate_losses[key].append(loss_value.clone().item()) #add sum here...
 
         # Compute the total loss
         loss = torch.sum(torch.stack(separate_loss))
@@ -423,15 +427,16 @@ print(data)
 MAJOR = 26
 MINOR = 20
 TICK = 16
-num_epochs = 50
+num_d_epochs = 100
+num_e_epochs = 100
 real_epochs = 50
 learning_rate = 1.0e-3 #in config: 1e-4
 predict = False
-predict_for_synthetic = True
-plot_synthetic = True
-plot_specific = False
+predict_for_synthetic = False
+plot_synthetic = False
+plot_specific = True
+plot_obsid = False
 SPEC_SCROLL=0
-
 
 #initialise data loaders and networks
 e_dataset, d_dataset, e_loaders, d_loaders, decoder, net = init()
@@ -444,7 +449,7 @@ os.makedirs(plots_directory+'reconstructions/', exist_ok=True)
 os.makedirs(plots_directory+'distributions/', exist_ok=True)
 
 # train decoder
-decoder.training(num_epochs, d_loaders) 
+decoder.training(num_d_epochs, d_loaders) 
 
 # #fix decoder's weights so they dont change while training the encoder
 net.net.net[1].requires_grad_(False)
@@ -454,169 +459,209 @@ net.optimiser = optim.AdamW(net.net.parameters(), lr=learning_rate)
 net.scheduler = optim.lr_scheduler.ReduceLROnPlateau(net.optimiser, factor=0.5, min_lr=1e-6,)
 
 # train autoencoder
-net.training(num_epochs, d_loaders)
+net.training(num_e_epochs, d_loaders)
 
 # train only first few layers of encoder - check layers 
 # net.net.net[0].net[2:].requires_grad_(False) 
 # net.net.net[0].net[12].requires_grad_(True) 
 
 # reset optimiser
-# net.optimiser = optim.AdamW(net.net.parameters(), lr=learning_rate*0.1)
-# net.scheduler = optim.lr_scheduler.ReduceLROnPlateau(net.optimiser, factor=0.5, min_lr=1e-6,)
+net.optimiser = optim.AdamW(net.net.parameters(), lr=learning_rate*0.1)
+net.scheduler = optim.lr_scheduler.ReduceLROnPlateau(net.optimiser, factor=0.5, min_lr=1e-6,)
 
-# net.training(num_epochs+real_epochs, e_loaders)
+net.training(num_e_epochs+real_epochs, e_loaders)
+
+synth_str = '_synthetic_' if predict_for_synthetic else ''
 
 #--- making predictions
+# save transforms
+transform = net.transforms['inputs']
+param_transform = net.transforms['targets']
+# # # clear transforms
+net.transforms['inputs'] = None
+net.transforms['targets'] = None
+# net.transforms['latent'] = None
+
+if predict_for_synthetic:
+    pred_loader = d_loaders
+    pred_dataset = d_dataset
+else:
+    pred_loader = e_loaders
+    pred_dataset = e_dataset
+
+
+
 if predict:
-    # save transforms
-    transform = net.transforms['inputs']
-    param_transform = net.transforms['targets']
-    # # clear transforms
-    net.transforms['inputs'] = None
-    net.transforms['targets'] = None
+    train_data = net.predict(pred_loader[0], num_samples=1000, input_=True)
+    val_data = net.predict(pred_loader[1], num_samples=1000, input_=True)
 
-
-    if predict_for_synthetic:
-        pred_loader = d_loaders
-        pred_dataset = d_dataset
-    else:
-        pred_loader = e_loaders
-        pred_dataset = e_dataset
-
-    data = net.predict(pred_loader[-1], num_samples=1, input_=True)
-    data1 = net.predict(pred_loader[-1], num_samples=3000, input_=True)
-
-    names = ['js_ni0100320101_0mpu7_goddard_GTI0.jsgrp', 
-            'js_ni0103010102_0mpu7_goddard_GTI0.jsgrp',
-            'js_ni1014010102_0mpu7_goddard_GTI30.jsgrp',
-            'js_ni1050360115_0mpu7_goddard_GTI9.jsgrp',
-            'js_ni1100320119_0mpu7_goddard_GTI26.jsgrp']
-    object_names=['Cyg X-1 (2017)',
-              'GRS 1915+105',
-              'LMC X-3',
-              'MAXI J1535-571',
-              'Cyg X-1 (2018)']
-    train_data = net.predict(e_loaders[0], num_samples=3000, input_=True)
-    val_data = net.predict(e_loaders[1], num_samples=3000, input_=True)
-    train_idxs = np.isin(train_data['ids'], names)
-    val_idxs = np.isin(val_data['ids'], names)
-    # # Then with the idxs, you can get the posteriors (or whatever else you want from the predicitons) by:
-    targets = np.concat((train_data['targets'][train_idxs],val_data['targets'][val_idxs]), axis=0)
-    latent = np.concat((train_data['latent'][train_idxs],val_data['latent'][val_idxs]), axis=0)
-    inputs = np.concat((train_data['inputs'][train_idxs], val_data['inputs'][val_idxs]), axis=0)
-    preds = np.concat((train_data['preds'][train_idxs], val_data['preds'][val_idxs]), axis=0)
-    new_names = np.concat((train_data['ids'][train_idxs], val_data['ids'][val_idxs]), axis=0)
-
-    # Reorder object_names to match new names
-    name_to_object = dict(zip(names, object_names))
-    new_object_names = [name_to_object[name] for name in new_names]
-
-    specific_data = {
-        'id': new_names,
-        'targets': targets,
-        'latent': latent,
-        'inputs': inputs,
-        'preds': preds,
-        'object': new_object_names
-    }
-
-    param_uncertainties = pred_dataset.param_uncertainty[np.isin(pred_dataset.names, data['ids'])]  # get uncertainties in 'ground truth' parameters
-    param_uncertainties1 = pred_dataset.param_uncertainty[np.isin(pred_dataset.names, data1['ids'])]
-
-    # orders param_uncertainties
-    specific_param_uncertainties = []
-    for i in range(len(specific_data['id'])):
-        specific_param_uncertainties.append(e_dataset.param_uncertainty[np.isin(e_dataset.names, specific_data['id'][i])])
-    specific_param_uncertainties = np.squeeze(np.array(specific_param_uncertainties))
-
-    # untransforms and stacks uncertainties
-    data['targets'] = np.stack(param_transform(data['targets'], back=True,
-                                                uncertainty=param_uncertainties), axis=1)
-    data['inputs'] = np.stack(transform(data['inputs'][:,0], back=True,
-                                            uncertainty=data['inputs'][:,1]), axis=1)
-    data1['targets'] = np.stack(param_transform(data1['targets'], back=True,
-                                                uncertainty=param_uncertainties1), axis=1)
-    data1['inputs'] = np.stack(transform(data1['inputs'][:,0], back=True,
-                                            uncertainty=data1['inputs'][:,1]), axis=1)
-    specific_data['targets'] = np.stack(param_transform(specific_data['targets'], back=True,
-                                                uncertainty=specific_param_uncertainties), axis=1)
-    specific_data['inputs'] = np.stack(transform(specific_data['inputs'][:,0], back=True,
-                                                uncertainty=specific_data['inputs'][:,1]), axis=1)
-
-    # reset transforms 
-    net.transforms['inputs'] = transform
-    net.transforms['targets'] = param_transform
-
-    # saves predictions to pickle file TRANSFORMED PARAM_UNCERTAINTIES
-    with open('/Users/astroai/Projects/FSPNet/predictions/preds1_'+pred_savename+'.pickle', 'wb') as file:
-        pickle.dump(data1, file)
-    with open('/Users/astroai/Projects/FSPNet/predictions/preds_'+pred_savename+'.pickle', 'wb') as file:
-        pickle.dump(data, file)
-    with open('/Users/astroai/Projects/FSPNet/predictions/preds_specific_'+pred_savename+'.pickle', 'wb') as file:
-        pickle.dump(specific_data, file)
+    with open('/Users/astroai/Projects/FSPNet/predictions/train_'+pred_savename+synth_str+'.pickle', 'wb') as file:
+        pickle.dump(train_data, file)
+    with open('/Users/astroai/Projects/FSPNet/predictions/val_'+pred_savename+synth_str+'.pickle', 'wb') as file:
+        pickle.dump(val_data, file)
+    
+    # data = net.predict(pred_loader[-1], num_samples=1, input_=True)
+    # data1 = net.predict(pred_loader[-1], num_samples=3000, input_=True)
 
 else:
-    # loads predictions from saved pickle file
-    with open('/Users/astroai/Projects/FSPNet/predictions/preds1_'+pred_savename+'.pickle', 'rb') as file:
-            data1 =pickle.load(file)
-    with open('/Users/astroai/Projects/FSPNet/predictions/preds_'+pred_savename+'.pickle', 'rb') as file:
-            data = pickle.load(file)
-    with open('/Users/astroai/Projects/FSPNet/predictions/preds_specific_'+pred_savename+'.pickle', 'rb') as file:
-        specific_data = pickle.load(file)
+    with open('/Users/astroai/Projects/FSPNet/predictions/train_'+pred_savename+synth_str+'.pickle', 'rb') as file:
+        train_data = pickle.load(file)
+    with open('/Users/astroai/Projects/FSPNet/predictions/val_'+pred_savename+synth_str+'.pickle', 'rb') as file:
+        val_data = pickle.load(file)
+
+# getting specific spectra
+names = ['js_ni0100320101_0mpu7_goddard_GTI0.jsgrp', 
+        'js_ni0103010102_0mpu7_goddard_GTI0.jsgrp',
+        'js_ni1014010102_0mpu7_goddard_GTI30.jsgrp',
+        'js_ni1050360115_0mpu7_goddard_GTI9.jsgrp',
+        'js_ni1100320119_0mpu7_goddard_GTI26.jsgrp',
+        'js_ni1200120203_0mpu7_goddard_GTI0.jsgrp',
+        'js_ni1200120203_0mpu7_goddard_GTI10.jsgrp',
+        'js_ni1200120203_0mpu7_goddard_GTI11.jsgrp',
+        'js_ni1200120203_0mpu7_goddard_GTI13.jsgrp',
+        'js_ni1200120203_0mpu7_goddard_GTI1.jsgrp',
+        'js_ni1200120203_0mpu7_goddard_GTI3.jsgrp',
+        'js_ni1200120203_0mpu7_goddard_GTI4.jsgrp',
+        'js_ni1200120203_0mpu7_goddard_GTI5.jsgrp',
+        'js_ni1200120203_0mpu7_goddard_GTI6.jsgrp',
+        'js_ni1200120203_0mpu7_goddard_GTI7.jsgrp',
+        'js_ni1200120203_0mpu7_goddard_GTI8.jsgrp',
+        'js_ni1200120203_0mpu7_goddard_GTI9.jsgrp']
+object_names=['Cyg X-1 (2017)',
+        'GRS 1915+105',
+        'LMC X-3',
+        'MAXI J1535-571',
+        'Cyg X-1 (2018)',
+        'MAXI J1820 0',
+        'MAXI J1820 10',
+        'MAXI J1820 11',
+        'MAXI J1820 13',
+        'MAXI J1820 1',
+        'MAXI J1820 3',
+        'MAXI J1820 4',
+        'MAXI J1820 5',
+        'MAXI J1820 6',
+        'MAXI J1820 7',
+        'MAXI J1820 8',
+        'MAXI J1820 9']
+
+train_idxs = np.isin(train_data['ids'], names)
+val_idxs = np.isin(val_data['ids'], names)
+# # Then with the idxs, you can get the posteriors (or whatever else you want from the predicitons) by:
+targets = np.concat((train_data['targets'][train_idxs],val_data['targets'][val_idxs]), axis=0)
+latent = np.concat((train_data['latent'][train_idxs],val_data['latent'][val_idxs]), axis=0)
+inputs = np.concat((train_data['inputs'][train_idxs], val_data['inputs'][val_idxs]), axis=0)
+preds = np.concat((train_data['preds'][train_idxs], val_data['preds'][val_idxs]), axis=0)
+new_names = np.concat((train_data['ids'][train_idxs], val_data['ids'][val_idxs]), axis=0)
+
+# Reorder object_names to match new names
+name_to_object = dict(zip(names, object_names))
+new_object_names = [name_to_object[name] for name in new_names]
+
+specific_data = {
+    'ids': new_names,
+    'targets': targets,
+    'latent': latent,
+    'inputs': inputs,
+    'preds': preds,
+    'object': new_object_names
+}
+
+# saves untransformed specific
+with open('/Users/astroai/Projects/FSPNet/predictions/specific_untrans_'+pred_savename+synth_str+'.pickle', 'wb') as file:
+    pickle.dump(specific_data, file)
+
+# getting parameter uncertainties from datasets
+train_param_uncertainties = pred_dataset.param_uncertainty[np.isin(pred_dataset.names, train_data['ids'])]  # get uncertainties in 'ground truth' parameters
+val_param_uncertainties = pred_dataset.param_uncertainty[np.isin(pred_dataset.names, val_data['ids'])]
+specific_param_uncertainties = []
+for i in range(len(specific_data['ids'])):
+    specific_param_uncertainties.append(e_dataset.param_uncertainty[np.isin(e_dataset.names, specific_data['ids'][i])])
+specific_param_uncertainties = np.squeeze(np.array(specific_param_uncertainties))
+
+# untransforms and stacks uncertainties
+train_data['targets'] = np.stack(param_transform(train_data['targets'], back=True,
+                                            uncertainty=train_param_uncertainties), axis=1)
+train_data['inputs'] = np.stack(transform(train_data['inputs'][:,0], back=True,
+                                        uncertainty=train_data['inputs'][:,1]), axis=1)
+val_data['targets'] = np.stack(param_transform(val_data['targets'], back=True,
+                                            uncertainty=val_param_uncertainties), axis=1)
+val_data['inputs'] = np.stack(transform(val_data['inputs'][:,0], back=True,
+                                        uncertainty=val_data['inputs'][:,1]), axis=1)
+# specific_data['targets'] = np.stack(param_transform(specific_data['targets'], back=True,
+#                                             uncertainty=specific_param_uncertainties), axis=1)
+# specific_data['inputs'] = np.stack(transform(specific_data['inputs'][:,0], back=True,
+#                                             uncertainty=specific_data['inputs'][:,1]), axis=1)
+
+# reset transforms 
+net.transforms['inputs'] = transform
+net.transforms['targets'] = param_transform
+
+with open('/Users/astroai/Projects/FSPNet/predictions/specific_'+pred_savename+synth_str+'.pickle', 'wb') as file:
+    pickle.dump(specific_data, file)
+#setting data1 and data from val_data - and saving as this is transformed data
+data1 = val_data
+with open('/Users/astroai/Projects/FSPNet/predictions/data1_'+pred_savename+synth_str+'.pickle', 'wb') as file:
+    pickle.dump(data1, file)
+
 
 # loading in xspec MCMC predictions
-with open('/Users/astroai/Projects/FSPNet/predictions/xspec_preds1.pickle', 'rb') as file:
-    xspec_data_unordered = pickle.load(file)
-
     # note:
     # xspec_preds is with default values and fitting with 1000 iterations before chain
     # xspec_preds1 is with precalulated values and fitting with 1000 iterations before chain
 
     # note: shapes:
-    #   id: number of specific spectra (5)
+    #   ids: number of specific spectra (5)
     #   object: number of specific spectra (5)
     #   posteriors: number of specific spectra (5), number of parameters, number of samples
     #   xspec_recon: number of specific spectra (5), 2 (indices: 0 is spectral energies, 1 is the spectra recontructions)
     #   chain_time: number of specific spectra (5)
 
-# shows the order of the spectra - numbers corresponds to xspec_data and their position corresponds to specific_data
-xspec_indices = []
-for specific_object in specific_data['object']:
-    for i, xspec_object in enumerate(xspec_data_unordered['object']):
-        if specific_object==xspec_object:
-            xspec_indices.append(i)
+with open('/Users/astroai/Projects/FSPNet/predictions/xspec_preds1.pickle', 'rb') as file:
+    xspec_data_unordered = pickle.load(file)
 
-# making sure xspec_data order matches specific_data order
-xspec_data = {
-    'id': [xspec_data_unordered['id'][i] for i in xspec_indices],
+# making the same order as specific_data
+xspec_lookup = {obj: i for i, obj in enumerate(xspec_data_unordered['object'])}     # Build a lookup dictionary for xspec objects
+xspec_indices = [xspec_lookup[obj] for obj in specific_data['object']]              # Get indices in the order of specific_data['object']   
+xspec_data = {                                                                      # Reorder xspec_data to match specific_data order
+    'ids': [xspec_data_unordered['id'][i] for i in xspec_indices],
     'object': [xspec_data_unordered['object'][i] for i in xspec_indices],
     'posteriors': [xspec_data_unordered['posteriors'][i] for i in xspec_indices],
     'xspec_recon': [xspec_data_unordered['xspec_recon'][i] for i in xspec_indices],
     'chain_time': [xspec_data_unordered['chain_time'][i] for i in xspec_indices]
 }
-
-# taking ~3000 randomly distributed data points from last half of the posterior samples
-new_posteriors = np.array([[random.sample(list(xspec_data['posteriors'] [spec_num][param_num][len(xspec_data['posteriors'][spec_num][param_num])//2:]), 3000) 
+# taking 5000 uniformly random distributed data points from last half of the posterior samples
+new_posteriors = np.array([[random.sample(list(xspec_data['posteriors'] [spec_num][param_num][len(xspec_data['posteriors'][spec_num][param_num])//2:]), 5000) 
                    for param_num in range(len(xspec_data['posteriors'][0]))] 
                    for spec_num in range(len(xspec_data['posteriors']))])
-
 xspec_data['posteriors']=new_posteriors
 
-# xspec_data['id'] = np.stack((xspec_data0['id'], xspec_data1['id'], xspec_data2['id'], xspec_data3['id'], xspec_data4['id']), axis=0)   
-# # note: reconstruction lists are all different lengths so we keep as a list
-# xspec_data['xspec_recon'] = [xspec_data0['xspec_recon'], xspec_data1['xspec_recon'], xspec_data2['xspec_recon'], xspec_data3['xspec_recon'], xspec_data4['xspec_recon']]
-# # note: xspec_data['posteriors'] shape = number of spectra, number of parameters, number of samples
-# xspec_data['posteriors'] = np.stack((xspec_data0['posteriors'], xspec_data1['posteriors'], xspec_data2['posteriors'], xspec_data3['posteriors'], xspec_data4['posteriors']), axis=0)
-
 # gets losses from the seperate losses attribute of the net class
-separate_losses = net.separate_losses # shape (number of iterations ((dataset/batch)*epochs), number of loss terms)
+separate_losses = net.separate_losses.copy()   # shape: (number of iterations ((dataset/batch)*epochs), number of loss terms)
+split_idx = num_e_epochs                # averaging loss over batch size
+# batches_per_epoch_e = 1000              # Number of batches per epoch for each phase
+# batches_per_epoch_real = 60
+# for key in ['reconstruct', 'flow', 'latent']:
+#     losses = separate_losses[key]
+#     averaged_losses = []
+#     # First num_e_epochs: average over 1000 spectra per batch
+#     for i in range(0, split_idx * batches_per_epoch_e, batches_per_epoch_e):
+#         averaged_losses.append(np.mean(losses[i:i + batches_per_epoch_e], axis=0))
+#     # Next real_epochs: average over 60 spectra per batch
+#     for i in range(split_idx * batches_per_epoch_e, len(losses), batches_per_epoch_real):
+#         averaged_losses.append(np.mean(losses[i:i + batches_per_epoch_real], axis=0))
+#     separate_losses[key] = averaged_losses
 
-# # averaging loss over batch size
-separate_losses['reconstruct'] = [np.mean(separate_losses['reconstruct'][i:i+len(e_loaders[0])], axis=0) for i in range(0, len(separate_losses['reconstruct']), len(e_loaders[0]))]
-separate_losses['flow'] = [np.mean(separate_losses['flow'][i:i+len(e_loaders[0])], axis=0) for i in range(0, len(separate_losses['flow']), len(e_loaders[0]))]  
-separate_losses['latent'] = [np.mean(separate_losses['latent'][i:i+len(e_loaders[0])], axis=0) for i in range(0, len(separate_losses['latent']), len(e_loaders[0]))]
-separate_losses['bound'] = [np.mean(separate_losses['bound'][i:i+len(e_loaders[0])], axis=0) for i in range(0, len(separate_losses['bound']), len(e_loaders[0]))]
-separate_losses['kl'] = [np.mean(separate_losses['kl'][i:i+len(e_loaders[0])], axis=0) for i in range(0, len(separate_losses['kl']), len(e_loaders[0]))]
+batch_size=60
+for key in ['reconstruct', 'flow', 'latent']:
+    losses = separate_losses[key]
+    averaged_losses = []
+    # First num_e_epochs: average over 1000 spectra per batch
+    for i in range(0, num_e_epochs+real_epochs, batch_size):
+        averaged_losses.append(np.mean(losses[i:i+batch_size], axis=0))
+    # Next real_epochs: average over 60 spectra per batch
+
+    separate_losses[key] = averaged_losses
 
 
 '''---------- PLOTTING PERFORMANCE ----------'''
@@ -646,10 +691,20 @@ plots.plot_performance(
     save_name='NF_d_performance'
 )
 
+total_counts= [np.sum(data1['inputs'][i,0,:]) for i in range(len(data1['inputs']))]
+kT = list(data1['targets'][:,0,3])
+nH = list(data1['targets'][:,0,0])
+gamma = list(data1['targets'][:,0,1])
+fsc = list(data1['targets'][:,0,2])
+errors = list(data1['targets'][:,])
+
 if plot_synthetic:
     # plotting comparison between parametrs
     comparison_plot(
         data1,
+        log_colour_map=True,
+        colour_map=total_counts,
+        colour_map_label='total counts',
         dir_name=plots_directory,
     )
 
@@ -658,7 +713,7 @@ if plot_synthetic:
                             num_samples=1,
                             spec_scroll=SPEC_SCROLL)
 
-    # # single reconstructions using samples from all_param_samples
+    # single reconstructions using samples from all_param_samples
     recon_plot(
         decoder.net,
         net,
@@ -669,7 +724,7 @@ if plot_synthetic:
         spec_scroll=SPEC_SCROLL
         )
 
-    # # posterior predictive plots using 500 samples per reconstruction
+    # posterior predictive plots using 500 samples per reconstruction
     post_pred_samples = post_pred_plot(
         decoder.net,
         net,
@@ -677,111 +732,247 @@ if plot_synthetic:
         data = data1,
     )
 
-    # # latent space corner plot
+    # latent space corner plot
     latent_corner_plot(
         dir_name = plots_directory+'distributions/',
         data=data1,
         )
 
-    # scatter plot across all parameters in dataset
-    param_pairs_plot(
-        data=data,
-        dir_name=plots_directory+'distributions/',
-    )
+    # # scatter plot across all parameters in dataset
+    # param_pairs_plot(
+    #     data=data,
+    #     dir_name=plots_directory+'distributions/',
+    # )
 
-elif plot_specific:
-     # # plotting comparison between parametrs
+#     # rec_2d_plot(
+#     #     decoder=decoder.net,
+#     #     network=net,
+#     #     dir_name = plots_directory+'reconstructions/',
+#     #     data=data,
+#     # )
+
+if plot_specific:
+#      # # plotting comparison between parametrs
+#     # comparison_plot(
+#     #     data1,
+#     #     dir_name=plots_directory,
+#     #     specific_data=specific_data
+#     # )
+
+#     all_param_samples = sample(specific_data,
+#                             num_specs=len(specific_data['ids']),
+#                             num_samples=1,
+#                             spec_scroll=SPEC_SCROLL)
+    
+    # comparison_plot(
+    #     data1,
+    #     log_colour_map=True,
+    #     colour_map=data1['targets'][:,1:,],
+    #     colour_map_label='Xspec 1 sigma error',
+    #     dir_name=plots_directory,
+    #     num_dist_specs=250,
+    #     n_points=50,
+    # )
+
+#         comparison_plot(
+#         data1,
+#         log_colour_map=True,
+#         colour_map=kT,
+#         colour_map_label='kT (keV)',
+#         dir_name=plots_directory,
+#         # specific_data=specific_data,
+#         num_dist_specs=250,
+#         n_points=50,
+#     )
+
     comparison_plot(
         data1,
+        log_colour_map=True,
+        colour_map=total_counts,
+        colour_map_label='Total count rate',
         dir_name=plots_directory,
-        specific_data=specific_data
+        num_dist_specs=250,
+        n_points=50,
     )
 
-    all_param_samples = sample(specific_data,
-                            num_specs=3,
-                            num_samples=1,
-                            spec_scroll=SPEC_SCROLL)
-
-    # # single reconstructions using samples from all_param_samples
-    recon_plot(
-        decoder.net,
-        net,
-        dir_name = plots_directory+'reconstructions/',
-        specific_data = specific_data,
-        data = data1,
-        all_param_samples = all_param_samples
-        )
-
-    # # posterior predictive plots using 500 samples per reconstruction
-    post_pred_samples = post_pred_plot(
-        decoder.net,
-        net,
-        dir_name = plots_directory+'reconstructions/',
-        data = data1,
-        specific_data = specific_data
+    coverage_plot(
+        dataset=e_dataset, 
+        loaders=e_loaders,
+        network = net,
+        dir_name=plots_directory
     )
 
-    # # latent space corner plot
-    latent_corner_plot(
-        dir_name = plots_directory+'distributions/',
-        specific_data = specific_data,
-        data=data1,
-        xspec_data=xspec_data
-        )
+#     comparison_plot(
+#         data1,
+#         log_colour_map=True,
+#         colour_map=gamma,
+#         colour_map_label='Gamma',
+#         dir_name=plots_directory,
+#         num_dist_specs=250,
+#         n_points=50,
+#     )
 
-    # scatter plot across all parameters in dataset
-    param_pairs_plot(
-        data=data,
-        dir_name=plots_directory+'distributions/',
-    )
+#     comparison_plot(
+#         data1,
+#         log_colour_map=True,
+#         colour_map=fsc,
+#         colour_map_label='$f_{sc}$',
+#         dir_name=plots_directory,
+#         num_dist_specs=250,
+#         n_points=50,
+#     )
 
-else:
-    # # plotting comparison between parametrs
-    comparison_plot(
-        data1,
-        dir_name=plots_directory,
-    )
+#     comparison_plot(
+#         data1,
+#         log_colour_map=True,
+#         colour_map=nH,
+#         colour_map_label='$N_H$',
+#         dir_name=plots_directory,
+#         num_dist_specs=250,
+#         n_points=50,
+#     )
 
-    all_param_samples = sample(data1,
-                            num_specs=3,
-                            num_samples=1,
-                            spec_scroll=SPEC_SCROLL)
+#     # single reconstructions using samples from all_param_samples
+#     recon_plot(
+#         decoder.net,
+#         net,
+#         dir_name = plots_directory+'reconstructions/',
+#         specific_data = specific_data,
+#         data = data1,
+#         all_param_samples = all_param_samples
+#         )
 
-    # # single reconstructions using samples from all_param_samples
-    recon_plot(
-        decoder.net,
-        net,
-        dir_name = plots_directory+'reconstructions/',
-        data = data1,
-        all_param_samples = all_param_samples
-        )
+#     # # posterior predictive plots using 500 samples per reconstructio    
+#     # post_pred_samples = post_pred_plot(
+#     #     decoder.net,
+#     #     net,
+#     #     dir_name = plots_directory+'reconstructions/',
+#     #     data = data1,
+#     #     specific_data = specific_data
+#     # )
 
-    # # posterior predictive plots using 500 samples per reconstruction
-    post_pred_samples = post_pred_plot(
-        decoder.net,
-        net,
-        dir_name = plots_directory+'reconstructions/',
-        data = data1,
-    )
+#     post_pred_plot_xspec(
+#         dir_name = plots_directory+'reconstructions/',
+#         data = data1,
+#         specific_data = specific_data
+#     )
 
-    # # latent space corner plot
-    latent_corner_plot(
-        dir_name = plots_directory+'distributions/',
-        data=data1,
-        )
+#     # # latent space corner plot
+#     latent_corner_plot(
+#         dir_name = plots_directory+'distributions/',
+#         specific_data = specific_data,
+#         data=data1,
+#         xspec_data=xspec_data,
+#         in_param_samples=all_param_samples,
+#         min_quant=0.0005,
+#         max_quant=0.9995,
+#         )
 
-    # scatter plot across all parameters in dataset
-    param_pairs_plot(
-        data=data,
-        dir_name=plots_directory+'distributions/',
-    )
+#     # scatter plot across all parameters in dataset
+#     # param_pairs_plot(
+#     #     data=data,
+#     #     dir_name=plots_directory+'distributions/',
+#     # )
+
+# # elif plot_obsid:
+# #     # comparison_plot(
+# #     #     data1,
+# #     #     dir_name=plots_directory,
+# #     #     specific_data=obsid_data
+# #     # )
+
+# #     all_param_samples = sample(obsid_data,
+# #                             num_specs=len(obsid_data['id']),
+# #                             num_samples=1,
+# #                             spec_scroll=SPEC_SCROLL)
+
+#     # # # single reconstructions using samples from all_param_samples
+#     # recon_plot(
+#     #     decoder.net,
+#     #     net,
+#     #     dir_name = plots_directory+'reconstructions/',
+#     #     data = obsid_data,
+#     #     num_specs=len(obsid_data['id']),
+#     #     all_param_samples = all_param_samples
+#     #     )
+
+#     # # # posterior predictive plots using 500 samples per reconstruction
+#     # post_pred_samples = post_pred_plot(
+#     #     decoder.net,
+#     #     net,
+#     #     num_specs=len(obsid_data['id']),
+#     #     dir_name = plots_directory+'reconstructions/',
+#     #     data = obsid_data,
+#     # )
+
+#     # # # # latent space corner plot
+#     # latent_corner_plot(
+#     #     dir_name = plots_directory+'distributions/',
+#     #     data=obsid_data,
+#     #     num_specs=len(obsid_data['id']),
+#     #     in_param_samples= all_param_samples,
+#     #     )
+
+# else:
+#     # # plotting comparison between parametrs
+#     # comparison_plot(
+#     #     data1,
+#     #     dir_name=plots_directory,
+#     # )
+
+#     comparison_plot(
+#         data1,
+#         log_colour_map=True,
+#         colour_map=kT,
+#         colour_map_label='kT (keV)',
+#         dir_name=plots_directory,
+#         num_dist_specs=250,
+#         n_points=50,
+#     )
+
+    # all_param_samples = sample(data1,
+    #                         num_specs=3,
+    #                         num_samples=1,
+    #                         spec_scroll=SPEC_SCROLL)
+
+    # # # single reconstructions using samples from all_param_samples
+    # recon_plot(
+    #     decoder.net,
+    #     net,
+    #     dir_name = plots_directory+'reconstructions/',
+    #     data = data1,
+    #     all_param_samples = all_param_samples
+    #     )
+
+    # # # posterior predictive plots using 500 samples per reconstruction
+    # post_pred_samples = post_pred_plot(
+    #     decoder.net,
+    #     net,
+    #     dir_name = plots_directory+'reconstructions/',
+    #     data = data1,
+    # )
+
+    # # # latent space corner plot
+    # latent_corner_plot(
+    #     dir_name = plots_directory+'distributions/',
+    #     data=data1,
+    #     )
+
+    # # scatter plot across all parameters in dataset
+    # param_pairs_plot(
+    #     data=data,
+    #     dir_name=plots_directory+'distributions/',
+    # )
+
+
 
 
 '''---------- pyxspec tests ----------'''
-
+# import xspec
 # xspec.Xset.chatter = 0
 # xspec.Xset.logChatter = 0
 
-# data['latent'] = np.squeeze(data['latent'])
-# data['targets'] = data['targets'][:,0,:]
-# pyxspec_tests(data)
+# data1['latent'] = data1['latent'][:,0,:] # np.median(data1['latent'], axis = 1)
+# data1['targets'] = data1['targets'][:,0,:]
+# for i in range(5):
+#     pyxspec_tests(data1)
