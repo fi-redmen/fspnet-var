@@ -11,4 +11,4 @@ Code used for variational autoencoder with normalising flow for spectral fitting
 
 **xspec_funcs**: functions that use xspec
 
-****
+**network_configs**: neural network configurations
