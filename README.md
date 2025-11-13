@@ -6,3 +6,4 @@ VAE_plots: Contains functions used for plotting
 
 MCMC_chains: Runs MCMC chains for certain spectra using pyxspec
 
+xspec_funcs: functions that use xspec
