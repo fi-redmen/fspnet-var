@@ -4,3 +4,5 @@ Main_VAE: Trains vanilla variational autoencoder network, makes predictions, and
 
 VAE_plots: Contains functions used for plotting
 
+MCMC_chains: Runs MCMC chains for certain spectra using pyxspec
+
