@@ -9,6 +9,6 @@ Code used for variational autoencoder with normalising flow for spectral fitting
 
 **MCMC_chains**: Runs MCMC chains for certain spectra using pyxspec
 
-**xspec_funcs**: functions that use xspec
+**xspec_funcs**: Functions that use xspec
 
-**network_configs**: neural network configurations
+**network_configs**: Neural network configurations
