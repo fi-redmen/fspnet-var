@@ -3,6 +3,7 @@ from numpy import ndarray
 import xspec
 import os
 from astropy.io import fits
+from fspnet.utils.preprocessing import _binning
 
 PARAM_LIMS: ndarray = np.array([[5.0e-3,75],[1.3,4],[1.0e-3,1],[2.5e-2, 4],[1.0e-2, 1.0e+10]])
 
@@ -55,7 +56,7 @@ def reduced_PG(
     params,
     spec_name,
     param_limits: ndarray = PARAM_LIMS,
-    data_dir = '/Users/astroai/Projects/FSPNet/data/spectra/'
+    data_dir = '/Users/work/Projects/FSPNet/data/spectra/'
     ):
 
     # params = [2.0, 2.5, 2.0e-2, 1.0, 1.0]  # Example parameters for the model
@@ -70,7 +71,10 @@ def reduced_PG(
 
     # Load spectrum and model
     xspec.Spectrum(spec_name)
-    xspec.AllModels.lmod("simplcutx", "/Users/astroai/Downloads/simplcutx/")
+    try:
+        xspec.AllModels.lmod('simplcutx', dirPath='/Users/work/Projects/FSPNet/simplcutx/')
+    except Exception as e:
+        xspec.AllModels.tclLoad('/Users/work/Projects/FSPNet/simplcutx/libjscutx.dylib')
 
     # settings for xspec
     xspec.AllModels.setEnergies("0.003  300. 1000 log")
@@ -91,3 +95,22 @@ def reduced_PG(
     xspec.AllModels.clear()
 
     return value
+
+def get_energy_widths(
+
+):
+    bin_limits = np.array([[0, 20, 248, 600, 1200, 1494, 1500], [2, 3, 4, 5, 6, 2, 1]], dtype=int)
+
+    bins = np.array([], dtype=int)
+    for i in range(len(bin_limits[0])-1):
+        bins = np.concatenate((bins, np.arange(bin_limits[0][i], bin_limits[0][i+1], bin_limits[1][i])))
+    bins=np.concatenate([bins, [1500]])
+
+    energy_bins = ((bins * 10) + 5 ) / 1e3
+    cut_off = (0.3, 10)
+    cut_indices_min = np.argwhere((energy_bins < cut_off[0]))
+    cut_indices_plus = np.argwhere((energy_bins > cut_off[1]))[1:]
+    energy_bins = np.delete(energy_bins, np.concatenate((cut_indices_min, cut_indices_plus)))
+    energy_width = np.diff(energy_bins)
+
+    return energy_width

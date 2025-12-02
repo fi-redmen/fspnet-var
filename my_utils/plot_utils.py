@@ -85,19 +85,6 @@ def make_margins(
     max_y = np.max(y)
 
     if log_plot:
-    #     x_inc = (10**(max(x)) - 10**(min(x))) * (10**x_margin)
-    #     y_inc = (10**(max(y)) - 10**(min(y))) * (10**y_margin)
-
-    #     low_x = np.log10(min(x)-x_inc)
-    #     high_x = np.log10(max(x)+x_inc)
-
-    #     low_y = np.log10(min_xy-y_inc)
-    #     high_y = np.log10(max_xy+y_inc)
-
-    #     axis.set_xlim(low_x, high_x)
-    #     axis.set_ylim(low_y, high_y)
-        # Calculate margin in linear space (not log space)
-
         # Add margin to data range in linear space
         x_inc = (max_x - min_x) * x_margin
         y_inc = (max_y - min_y) * y_margin
@@ -191,7 +178,7 @@ def _binning(x_data: ndarray, bins: ndarray) -> tuple[ndarray, ndarray, ndarray]
 
 def get_energies(
     spectrum: str | None = 'js_ni0100320101_0mpu7_goddard_GTI0.jsgrp',
-    data_dir: str | None = '/Users/astroai/Projects/FSPNet/data/spectra/'
+    data_dir: str | None = '/Users/work/Projects/FSPNet/data/spectra/'
 
 ):
     # to get energies for spectra
@@ -213,7 +200,7 @@ def get_energies(
 def xspec_reconstruction(
     xspec_params: ndarray,
     spectrum: str | int,
-    data_dir: str | None = '/Users/astroai/Projects/FSPNet/data/',
+    data_dir: str | None = '/Users/work/Projects/FSPNet/data/',
     ):
     
     """
@@ -232,7 +219,7 @@ def xspec_reconstruction(
         Reconstructed spectra
     """
 
-     # prevents xspec from printing to console
+    # prevents xspec from printing to console
     xspec.Xset.chatter = 0
     xspec.Xset.logChatter = 0
 
@@ -263,11 +250,14 @@ def xspec_reconstruction(
     background=data_dir + spectrum_info['BACKFILE'],
     exposure=spectrum_info['EXPOSURE'])
 
-    # loads the simplcutx model
-    xspec.AllModels.lmod("simplcutx", "/Users/astroai/Downloads/simplcutx/")
-
     # creates list of xspec parameters - includes fixed values.
     xspec_params = list(np.concat([xspec_params[:3], [0.0, 100.0], xspec_params[3:]])) 
+
+    # loads the simplcutx model
+    try:
+        xspec.AllModels.lmod('simplcutx', dirPath='/Users/work/Projects/FSPNet/simplcutx/')
+    except Exception as e:
+        xspec.AllModels.tclLoad('/Users/work/Projects/FSPNet/simplcutx/libjscutx.dylib')
 
     # settings for xspec
     xspec.AllModels.setEnergies("0.003  300. 1000 log")
@@ -299,7 +289,7 @@ def decoder_reconstruction(
     decoder,
     network,
     spectrum: str = 'js_ni0100320101_0mpu7_goddard_GTI0.jsgrp',
-    data_dir: str = '/Users/astroai/Projects/FSPNet/data/spectra/',
+    data_dir: str = '/Users/work/Projects/FSPNet/data/spectra/',
 ):
     '''
     Obtains decoder reconstructions from given parameters
@@ -355,17 +345,17 @@ def quantile_limits(
                     if bottom_plot_num!=left_plot_num:
 
                         y_min = np.max([np.min([np.quantile(all_data[i][:,bottom_plot_num], min_quant) for i in range(len(all_data))]),
-                                        PARAM_LIMS[bottom_plot_num][0]])
+                                        param_lims[bottom_plot_num][0]])
                         
                         y_max = np.min([np.max([np.quantile(all_data[i][:,bottom_plot_num], max_quant) for i in range(len(all_data))]),
-                                        PARAM_LIMS[bottom_plot_num][1]])
+                                        param_lims[bottom_plot_num][1]])
 
                         x_min = np.max([np.min([np.quantile(all_data[i][:,left_plot_num], min_quant) for i in range(len(all_data))]),
-                                        PARAM_LIMS[left_plot_num][0]])
+                                        param_lims[left_plot_num][0]])
 
                         x_max = np.min([np.max([np.quantile(all_data[i][:,left_plot_num], max_quant) for i in range(len(all_data))]),
-                                        PARAM_LIMS[left_plot_num][1]])
-                        
+                                        param_lims[left_plot_num][1]])
+
                         # y_min = np.min([np.quantile(all_data[i][:,bottom_plot_num], min_quant) for i in range(len(all_data))])
                         
                         # y_max = np.max([np.quantile(all_data[i][:,bottom_plot_num], max_quant) for i in range(len(all_data))])
@@ -385,10 +375,9 @@ def quantile_limits(
 
                     else: 
                         x_min = np.max([np.min([np.quantile(all_data[i][:,bottom_plot_num], min_quant) for i in range(len(all_data))]),
-                                        PARAM_LIMS[bottom_plot_num][0]])
-                        
+                                        param_lims[bottom_plot_num][0]])
                         x_max = np.min([np.max([np.quantile(all_data[i][:,bottom_plot_num], max_quant) for i in range(len(all_data))]),
-                                        PARAM_LIMS[bottom_plot_num][1]])
+                                        param_lims[bottom_plot_num][1]])
 
                         # x_min = np.min([np.quantile(all_data[i][:,bottom_plot_num], min_quant) for i in range(len(all_data))])
                         
@@ -398,6 +387,3 @@ def quantile_limits(
                             x_max = 1.45
 
                         fig.axes[bottom_plot_num*5+left_plot_num].set_xlim(x_min, x_max)
-
-
-# def add_scatter():
