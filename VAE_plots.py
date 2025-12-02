@@ -894,7 +894,7 @@ def post_pred_plot_xspec(
     """
 
     # number of spectra which is either the number of specific spectra or num_specs
-    num_specs = np.min(len(specific_data['targets']),num_specs) if specific_data else num_specs
+    num_specs = np.min([len(specific_data['targets']),num_specs]) if specific_data else num_specs
     colors = COLORS_DICT if specific_data else COLORS_LIST*num_specs
 
     # if we haven't been given the samples already
