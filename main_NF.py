@@ -515,7 +515,29 @@ class NFautoencoder(nets.Autoencoder):
         final_loss = self._train_val(loaders[1])
         print(f'\nFinal validation loss: {final_loss:.3e}')
 
-def NF_train(decoder, net, e_dataset, d_dataset, e_loaders, d_loaders, num_d_epochs, num_e_epochs, real_epochs, learning_rate):
+def NF_train(decoder, net, e_loaders, d_loaders, num_d_epochs, num_e_epochs, real_epochs, learning_rate):
+    """
+    Trains the normalising flow network.
+
+    Parameters
+    ----------
+    decoder :
+        The decoder model.
+    net :
+        The normalising flow network.
+    e_loaders :
+        The encoder data loaders. - in this case is just real data loaders
+    d_loaders :
+        The decoder data loaders. - in this case is just synthetic data loaders
+    num_d_epochs : int
+        The maximum number of epochs to train the decoder.
+    num_e_epochs : int
+        The maximum number of epochs to train the entire network end to end on synthetic data.
+    real_epochs : int
+        The maximum number of epochs to train the entire network end to end on real data.
+    learning_rate : float
+        The learning rate for the optimizer.
+    """
     # train decoder
     decoder.training(num_d_epochs, d_loaders) 
 
@@ -545,7 +567,35 @@ def NF_train(decoder, net, e_dataset, d_dataset, e_loaders, d_loaders, num_d_epo
     net.training(num_e_epochs+real_epochs, e_loaders)
 
 #--- making predictions
-def NF_predict(net, e_dataset, d_dataset, e_loaders, d_loaders, names, object_names, predict_for_synthetic=False):
+def NF_predict(net, e_dataset, d_dataset, e_loaders, d_loaders, names, object_names, pred_savename, predict_for_synthetic=False):
+    """
+    Makes and saves predictions from the normalising flow network.
+    Parameters
+    ----------
+    net :
+        The normalising flow network.
+    e_dataset :
+        The encoder dataset. - in this case is just real dataset
+    d_dataset :
+        The decoder dataset. - in this case is just synthetic dataset
+    e_loaders :
+        The encoder dataloaders. - in this case is just real dataloaders
+    d_loaders :
+        The decoder dataloaders. - in this case is just synthetic dataloaders
+    names : list
+        List of object names for specific predictions.
+    object_names : list
+        List of full object names for specific predictions.
+    pred_savename : str
+        Name to save the prediction files as.
+    predict_for_synthetic : bool
+        Whether to make predictions for synthetic data or not.
+    Returns
+    -------
+    tuple[dict, dict]
+        Tuple containing all data and specific data dictionaries.
+    """
+
     synth_str = '_synthetic_' if predict_for_synthetic else ''
 
     if predict_for_synthetic:    # specifying loader, based on synthetic predictions or real
@@ -604,6 +654,19 @@ def NF_predict(net, e_dataset, d_dataset, e_loaders, d_loaders, names, object_na
     return val_data, specific_data
 
 def NF_load_preds(pred_savename, predict_for_synthetic=False):
+    """
+    Loads predictions and data from pickle files.
+    Parameters
+    ----------
+    pred_savename : str
+        Name of the prediction files to load.
+    predict_for_synthetic : bool
+        Whether to load synthetic predictions or not.
+    Returns
+    -------
+    tuple[dict, dict]
+        Tuple containing validation and specific data dictionaries.
+    """
     synth_str = '_synthetic_' if predict_for_synthetic else ''
     with open('/Users/work/Projects/FSPNet/predictions/specific_'+pred_savename+synth_str+'.pickle', 'rb') as file:
         specific_data = pickle.load(file)
@@ -620,6 +683,17 @@ def NF_load_preds(pred_savename, predict_for_synthetic=False):
 
 # loading in xspec MCMC predictions
 def load_xspec_preds(specific_data):
+    """
+    Loads xspec MCMC predictions from a pickle file.
+    Parameters
+    ----------
+    specific_data : dict
+        Dictionary containing specific data with 'object' key for ordering.
+    Returns
+    -------
+    xspec_data : dict
+        Dictionary containing ordered xspec predictions.
+    """
         # note:
         # xspec_preds is with default values and fitting with 1000 iterations before chain
         # xspec_preds1 is with precalulated values and fitting with 1000 iterations before chain
@@ -675,23 +749,8 @@ def main(num_d_epochs=150, num_e_epochs=150, real_epochs=150, learning_rate=0.00
 
     xspec_data = load_xspec_preds(specific_data)
 
-    # to color data by certain parameters
-    kT = list(val_data['targets'][:,0,3])
-    nH = list(val_data['targets'][:,0,0])
-    gamma = list(val_data['targets'][:,0,1])
-    fsc = list(val_data['targets'][:,0,2])
-    nH_errors = list(val_data['targets'][:,1,0])
-    det_nums=[]
-    for spectrum in val_data['ids']:
-        with fits.open('/Users/work/Projects/FSPNet/data/spectra/'+spectrum) as file:
-            spectrum_info = file[1].header
-        det_nums.append(int(re.search(r'_d(\d+)', spectrum_info['RESPFILE']).group(1)))
-    det_nums = np.array(det_nums)[:,np.newaxis]
-    widths = get_energy_widths()[np.newaxis]
-    total_counts=np.sum(val_data['inputs'][:,0,:]*det_nums*widths, axis=-1)
-
     '''---------- PLOTTING ----------'''
-    # autoencoder performance - remember to change part of net_init to include autoencoder and not encoder
+    # autoencoder performance - remember to change part of net_init to correspond to encoder only vs autoencoder
     plots.plot_performance(
         'Loss',
         net.losses[1][1:],
@@ -716,6 +775,7 @@ def main(num_d_epochs=150, num_e_epochs=150, real_epochs=150, learning_rate=0.00
     #     total_loss[key] = np.concatenate((synth_loss[key], real_loss[key]), axis=0)
     #     total_loss[key]=synth_loss[key]
 
+    # separate losses performance plot
     # performance_plot(
     #     'Loss',
     #     {key: value.tolist() for key, value in total_loss.items()},
@@ -723,7 +783,7 @@ def main(num_d_epochs=150, num_e_epochs=150, real_epochs=150, learning_rate=0.00
     #     save_name='NF_allloss.png'
     # )
 
-    # # decoder performance
+    # decoder performance
     plots.plot_performance(
         'Loss',
         decoder.losses[1][1:],
@@ -732,10 +792,25 @@ def main(num_d_epochs=150, num_e_epochs=150, real_epochs=150, learning_rate=0.00
         save_name='NF_d_performance'
     )
 
-    # if plot_synthetic:
     # plotting comparison between parameters
+    # to color data by certain parameters
+    kT = list(val_data['targets'][:,0,3])
+    nH = list(val_data['targets'][:,0,0])
+    gamma = list(val_data['targets'][:,0,1])
+    fsc = list(val_data['targets'][:,0,2])
+    nH_errors = list(val_data['targets'][:,1,0])
+    det_nums=[]
+    for spectrum in val_data['ids']:
+        with fits.open('/Users/work/Projects/FSPNet/data/spectra/'+spectrum) as file:
+            spectrum_info = file[1].header
+        det_nums.append(int(re.search(r'_d(\d+)', spectrum_info['RESPFILE']).group(1)))
+    det_nums = np.array(det_nums)[:,np.newaxis]
+    widths = get_energy_widths()[np.newaxis]
+    total_counts=np.sum(val_data['inputs'][:,0,:]*det_nums*widths, axis=-1)
+
     comparison_plot(
         val_data,
+        specific_data=specific_data,
         log_colour_map=True,
         colour_map=kT,
         colour_map_label='kT (keV)',
@@ -752,7 +827,7 @@ def main(num_d_epochs=150, num_e_epochs=150, real_epochs=150, learning_rate=0.00
         pred_savename=pred_savename,
     )
 
-    all_param_samples = sample(val_data,
+    all_param_samples = sample(specific_data if specific else val_data,
                             num_specs=len(specific_data['ids']),
                             num_samples=1,
                             spec_scroll=SPEC_SCROLL)
