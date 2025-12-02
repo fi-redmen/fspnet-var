@@ -30,7 +30,7 @@ import matplotlib.pyplot as plt
 
 from VAE_plots import comparison_plot, recon_plot, post_pred_plot, latent_corner_plot, rec_2d_plot, param_pairs_plot 
 from VAE_plots import performance_plot, post_pred_plot_xspec, coverage_plot
-from my_utils.misc_utils import sample, get_energy_widths
+from NF_utils.misc_utils import sample, get_energy_widths
 
 import numpy as np
 from numpy import ndarray
