@@ -1,4 +1,6 @@
 # from NFautoencoder import NFautoencoder, net_init, GaussianNLLLoss, MSELoss
+# import pandas as pd
+# from netloader_tests import TestConfig, gen_indexes, mod_network
 import xspec
 from fspnet.spectrum_fit import init 
 
@@ -513,113 +515,46 @@ class NFautoencoder(nets.Autoencoder):
         final_loss = self._train_val(loaders[1])
         print(f'\nFinal validation loss: {final_loss:.3e}')
 
-# added e_dataset, d_dataset changed. put this function into code
-# do the same with net_init - so you dont have to untransfrom and retransform
+def NF_train(decoder, net, e_dataset, d_dataset, e_loaders, d_loaders, num_d_epochs, num_e_epochs, real_epochs, learning_rate):
+    # train decoder
+    decoder.training(num_d_epochs, d_loaders) 
 
-# ctrl (or command) click on 'SplineFlow' here to see how Ethan implements the normalising flow
-# from netloader.layers.flows import SplineFlow
+    # # #fix decoder's weights so they dont change while training the encoder
+    net.net.net[1] = decoder.net
+    net.net.net[1].requires_grad_(False)
 
-# for getting specific spectra
-names = ['js_ni0100320101_0mpu7_goddard_GTI0.jsgrp', 
-        'js_ni0103010102_0mpu7_goddard_GTI0.jsgrp',
-        'js_ni1014010102_0mpu7_goddard_GTI30.jsgrp',
-        'js_ni1050360115_0mpu7_goddard_GTI9.jsgrp',
-        'js_ni1100320119_0mpu7_goddard_GTI26.jsgrp',
-        'js_ni1200120203_0mpu7_goddard_GTI0.jsgrp',
-        'js_ni1200120203_0mpu7_goddard_GTI10.jsgrp',
-        'js_ni1200120203_0mpu7_goddard_GTI11.jsgrp',
-        'js_ni1200120203_0mpu7_goddard_GTI13.jsgrp',
-        'js_ni1200120203_0mpu7_goddard_GTI1.jsgrp',
-        'js_ni1200120203_0mpu7_goddard_GTI3.jsgrp',
-        'js_ni1200120203_0mpu7_goddard_GTI4.jsgrp',
-        'js_ni1200120203_0mpu7_goddard_GTI5.jsgrp',
-        'js_ni1200120203_0mpu7_goddard_GTI6.jsgrp',
-        'js_ni1200120203_0mpu7_goddard_GTI7.jsgrp',
-        'js_ni1200120203_0mpu7_goddard_GTI8.jsgrp',
-        'js_ni1200120203_0mpu7_goddard_GTI9.jsgrp']
-object_names=['Cyg X-1 (2017)',
-        'GRS 1915+105',
-        'LMC X-3',
-        'MAXI J1535-571',
-        'Cyg X-1 (2018)',
-        'MAXI J1820 0',
-        'MAXI J1820 10',
-        'MAXI J1820 11',
-        'MAXI J1820 13',
-        'MAXI J1820 1',
-        'MAXI J1820 3',
-        'MAXI J1820 4',
-        'MAXI J1820 5',
-        'MAXI J1820 6',
-        'MAXI J1820 7',
-        'MAXI J1820 8',
-        'MAXI J1820 9']
+    #setting up autoencoder optimiser correctly - likely to not be needed
+    if net.epochs==0:
+        net.optimiser = optim.AdamW(net.net.parameters(), lr=learning_rate)
+        net.scheduler = optim.lr_scheduler.ReduceLROnPlateau(net.optimiser, min_lr=1e-6,)
 
-# settings
-num_d_epochs = 400
-num_e_epochs = 121
-real_epochs = 216
-learning_rate = 1.0e-3 #in config: 1e-4
-predict = True
-predict_for_synthetic = False
-plot_synthetic = False
-plot_specific = True
-plot_obsid = False
-SPEC_SCROLL=0
+    # train autoencoder on synthetic
+    net.training(num_e_epochs, d_loaders)
 
-#initialise data loaders and networks
-e_dataset, d_dataset, e_loaders, d_loaders, decoder, net = init()
-
-# saves name of predictions as encoder name_decoder name
-synth_plot_str = 'synth' if plot_synthetic else 'real'
-pred_savename = os.path.basename(net.save_path)[:-4]+' '+os.path.basename(decoder.save_path)[:-4] #'Encoder NF0_2' #
-plots_directory = '/Users/work/Projects/FSPNet/plots/'+pred_savename+'/'+synth_plot_str+'_preds/'
-os.makedirs(plots_directory, exist_ok=True)
-os.makedirs(plots_directory+'reconstructions/', exist_ok=True)
-os.makedirs(plots_directory+'distributions/', exist_ok=True)
-os.makedirs(plots_directory+'comparisons/', exist_ok=True)
-
-# def NF_train():
-# train decoder
-# decoder.training(num_d_epochs, d_loaders) 
-
-# # # #fix decoder's weights so they dont change while training the encoder
-# net.net.net[1] = decoder.net
-# net.net.net[1].requires_grad_(False)
-
-# #setting up autoencoder optimiser correctly - likely to not be needed
-# if net.epochs==0:
-#     net.optimiser = optim.AdamW(net.net.parameters(), lr=learning_rate)
-#     net.scheduler = optim.lr_scheduler.ReduceLROnPlateau(net.optimiser, min_lr=1e-6,)
-
-# train autoencoder
-# net.training(num_e_epochs, d_loaders)
-
-'''uncoment this to train only first few layers of encoder - check layers''' 
-# net.net.net[0].net[2:].requires_grad_(False) 
-# net.net.net[0].net[12].requires_grad_(True) 
-''' uncomment this to use unsupervised training'''
-# net.latent_loss = 0   # for unsupervised
-# net.flowlossweight = 0
-'''uncomment this to train on real'''
-# rest optimiser and train autoencoder on real
-# if net.get_epochs() == num_e_epochs:
-#     net.optimiser = optim.AdamW(net.net.parameters(), lr=learning_rate*0.1)
-#     net.scheduler = optim.lr_scheduler.ReduceLROnPlateau(net.optimiser, factor=0.5, min_lr=1e-6)
-# net.training(num_e_epochs+real_epochs, e_loaders)
-
-# def 
-synth_str = '_synthetic_' if predict_for_synthetic else ''
+    '''uncoment this to train only first few layers of encoder - check which layers are indexed''' 
+    # net.net.net[0].net[2:].requires_grad_(False)
+    # net.net.net[0].net[12].requires_grad_(True)
+    ''' uncomment this to use unsupervised training'''
+    # net.latent_loss = 0   # for unsupervised
+    # net.flowlossweight = 0
+    '''train on real'''
+    # rest optimiser and train autoencoder on real
+    if net.get_epochs() == num_e_epochs:
+        net.optimiser = optim.AdamW(net.net.parameters(), lr=learning_rate*0.1)
+        net.scheduler = optim.lr_scheduler.ReduceLROnPlateau(net.optimiser, factor=0.5, min_lr=1e-6)
+    net.training(num_e_epochs+real_epochs, e_loaders)
 
 #--- making predictions
-if predict_for_synthetic:    # specifying loader, based on synthetic predictions or real
-    pred_loader = d_loaders
-    pred_dataset = d_dataset
-else:
-    pred_loader = e_loaders
-    pred_dataset = e_dataset
+def NF_predict(net, e_dataset, d_dataset, e_loaders, d_loaders, names, object_names, predict_for_synthetic=False):
+    synth_str = '_synthetic_' if predict_for_synthetic else ''
 
-if predict:
+    if predict_for_synthetic:    # specifying loader, based on synthetic predictions or real
+        pred_loader = d_loaders
+        pred_dataset = d_dataset
+    else:
+        pred_loader = e_loaders
+        pred_dataset = e_dataset
+
 
     net_transforms = net.transforms.copy()  # save transforms
     for key in net.transforms:      # clear transforms
@@ -647,9 +582,6 @@ if predict:
             else:
                 pred_data[key] = transform(pred_data[key], back=True)
 
-    # reset transforms 
-    net.transforms = net_transforms
-
     if 'latent' not in specific_data and 'distributions' in specific_data:
         specific_data['latent']=specific_data['distributions']
         val_data['latent']=val_data['distributions']
@@ -660,13 +592,19 @@ if predict:
     name_to_object = dict(zip(names, object_names))
     new_object_names = [name_to_object[name] for name in specific_data['ids']]
     specific_data['object']=new_object_names
+    
+    # reset transforms 
+    net.transforms = net_transforms
 
     with open('/Users/work/Projects/FSPNet/predictions/specific_'+pred_savename+synth_str+'.pickle', 'wb') as file:
         pickle.dump(specific_data, file)
     with open('/Users/work/Projects/FSPNet/predictions/val_'+pred_savename+synth_str+'.pickle', 'wb') as file:
         pickle.dump(val_data, file)
+    
+    return val_data, specific_data
 
-else:
+def NF_load_preds(pred_savename, predict_for_synthetic=False):
+    synth_str = '_synthetic_' if predict_for_synthetic else ''
     with open('/Users/work/Projects/FSPNet/predictions/specific_'+pred_savename+synth_str+'.pickle', 'rb') as file:
         specific_data = pickle.load(file)
     with open('/Users/work/Projects/FSPNet/predictions/val_'+pred_savename+synth_str+'.pickle', 'rb') as file:
@@ -678,105 +616,130 @@ else:
         specific_data['preds']=specific_data['inputs']
         val_data['preds']=val_data['inputs']
 
-data1 = val_data
+    return val_data, specific_data
 
 # loading in xspec MCMC predictions
-    # note:
-    # xspec_preds is with default values and fitting with 1000 iterations before chain
-    # xspec_preds1 is with precalulated values and fitting with 1000 iterations before chain
-with open('/Users/work/Projects/FSPNet/predictions/xspec_preds1.pickle', 'rb') as file:
-    xspec_data_unordered = pickle.load(file)
+def load_xspec_preds(specific_data):
+        # note:
+        # xspec_preds is with default values and fitting with 1000 iterations before chain
+        # xspec_preds1 is with precalulated values and fitting with 1000 iterations before chain
+    with open('/Users/work/Projects/FSPNet/predictions/xspec_preds1.pickle', 'rb') as file:
+        xspec_data_unordered = pickle.load(file)
 
-# making the same order as specific_data
-xspec_lookup = {obj: i for i, obj in enumerate(xspec_data_unordered['object'])}     # Build a lookup dictionary for xspec objects
-xspec_indices = [xspec_lookup[obj] for obj in specific_data['object']]              # Get indices in the order of specific_data['object']   
-xspec_data = {                                                                      # Reorder xspec_data to match specific_data order
-    'ids': [xspec_data_unordered['id'][i] for i in xspec_indices],
-    'object': [xspec_data_unordered['object'][i] for i in xspec_indices],
-    'posteriors': [xspec_data_unordered['posteriors'][i] for i in xspec_indices],
-    'xspec_recon': [xspec_data_unordered['xspec_recon'][i] for i in xspec_indices],
-    'chain_time': [xspec_data_unordered['chain_time'][i] for i in xspec_indices]
-}
-# taking 5000 uniformly random distributed data points from last half of the posterior samples
-new_posteriors = np.array([[random.sample(list(xspec_data['posteriors'] [spec_num][param_num][len(xspec_data['posteriors'][spec_num][param_num])//2:]), 5000) 
-                   for param_num in range(len(xspec_data['posteriors'][0]))] 
-                   for spec_num in range(len(xspec_data['posteriors']))])
-xspec_data['posteriors']=new_posteriors
+    # making the same order as specific_data
+    xspec_lookup = {obj: i for i, obj in enumerate(xspec_data_unordered['object'])}     # Build a lookup dictionary for xspec objects
+    xspec_indices = [xspec_lookup[obj] for obj in specific_data['object']]              # Get indices in the order of specific_data['object']   
+    xspec_data = {                                                                      # Reorder xspec_data to match specific_data order
+        'ids': [xspec_data_unordered['id'][i] for i in xspec_indices],
+        'object': [xspec_data_unordered['object'][i] for i in xspec_indices],
+        'posteriors': [xspec_data_unordered['posteriors'][i] for i in xspec_indices],
+        'xspec_recon': [xspec_data_unordered['xspec_recon'][i] for i in xspec_indices],
+        'chain_time': [xspec_data_unordered['chain_time'][i] for i in xspec_indices]
+    }
+    # taking 5000 uniformly random distributed data points from last half of the posterior samples
+    new_posteriors = np.array([[random.sample(list(xspec_data['posteriors'] [spec_num][param_num][len(xspec_data['posteriors'][spec_num][param_num])//2:]), 5000) 
+                    for param_num in range(len(xspec_data['posteriors'][0]))] 
+                    for spec_num in range(len(xspec_data['posteriors']))])
+    xspec_data['posteriors']=new_posteriors
 
-# gets losses from the seperate losses attribute of the net class
-# final_synth_epoch = 121
-# final_real_epoch = len(net.losses[1])-final_synth_epoch
+    return xspec_data
 
-# synth_cut = final_synth_epoch*len(d_loaders[0])
+def main(num_d_epochs=150, num_e_epochs=150, real_epochs=150, learning_rate=0.001, train=False, predict=False, predict_for_synthetic=False, specific=True):
 
-# synth_loss ={}
-# real_loss ={}
-# total_loss = {}
+    #initialise data loaders and networks
+    e_dataset, d_dataset, e_loaders, d_loaders, decoder, net = init()
+    
+    # saves name of predictions as encoder name_decoder name
+    synth_plot_str = 'synthetic'  if predict_for_synthetic else 'real'
+    pred_savename = os.path.basename(net.save_path)[:-4]+' '+os.path.basename(decoder.save_path)[:-4] #'Encoder NF0_2' #
+    plots_directory = '/Users/work/Projects/FSPNet/plots/'+pred_savename+'/'+synth_plot_str+'_preds/'
+    os.makedirs(plots_directory, exist_ok=True)
+    os.makedirs(plots_directory+'reconstructions/', exist_ok=True)
+    os.makedirs(plots_directory+'distributions/', exist_ok=True)
+    os.makedirs(plots_directory+'comparisons/', exist_ok=True)
 
-# for key in ['reconstruct', 'flow', 'latent', 'bound', 'kl']:
-#     synth_loss[key] = np.array(net.separate_losses[key])[:synth_cut].reshape(final_synth_epoch, -1)
-#     real_loss[key] = np.array(net.separate_losses[key])[synth_cut:synth_cut+final_real_epoch*len(e_loaders[0])].reshape(final_real_epoch, -1)
+    # for getting specific spectra
+    names = ['js_ni0100320101_0mpu7_goddard_GTI0.jsgrp','js_ni0103010102_0mpu7_goddard_GTI0.jsgrp','js_ni1014010102_0mpu7_goddard_GTI30.jsgrp','js_ni1050360115_0mpu7_goddard_GTI9.jsgrp','js_ni1100320119_0mpu7_goddard_GTI26.jsgrp','js_ni1200120203_0mpu7_goddard_GTI0.jsgrp','js_ni1200120203_0mpu7_goddard_GTI10.jsgrp','js_ni1200120203_0mpu7_goddard_GTI11.jsgrp','js_ni1200120203_0mpu7_goddard_GTI13.jsgrp','js_ni1200120203_0mpu7_goddard_GTI1.jsgrp','js_ni1200120203_0mpu7_goddard_GTI3.jsgrp','js_ni1200120203_0mpu7_goddard_GTI4.jsgrp','js_ni1200120203_0mpu7_goddard_GTI5.jsgrp','js_ni1200120203_0mpu7_goddard_GTI6.jsgrp','js_ni1200120203_0mpu7_goddard_GTI7.jsgrp','js_ni1200120203_0mpu7_goddard_GTI8.jsgrp','js_ni1200120203_0mpu7_goddard_GTI9.jsgrp']
+    object_names=['Cyg X-1 (2017)','GRS 1915+105','LMC X-3','MAXI J1535-571','Cyg X-1 (2018)','MAXI J1820 0','MAXI J1820 10','MAXI J1820 11','MAXI J1820 13','MAXI J1820 1','MAXI J1820 3','MAXI J1820 4','MAXI J1820 5','MAXI J1820 6','MAXI J1820 7','MAXI J1820 8','MAXI J1820 9']
 
-#     synth_loss[key]=np.mean(synth_loss[key], axis=-1)
-#     real_loss[key]=np.mean(real_loss[key], axis=-1)
+    if train:
+        NF_train(decoder, net, e_dataset, d_dataset, e_loaders, d_loaders, num_d_epochs, num_e_epochs, real_epochs, learning_rate)
+        val_data, specific_data = NF_predict(net, e_dataset, d_dataset, e_loaders, d_loaders, names, object_names, predict_for_synthetic)
+    elif predict:
+        val_data, specific_data = NF_predict(net, e_dataset, d_dataset, e_loaders, d_loaders, names, object_names, predict_for_synthetic)
+    else:
+        val_data, specific_data = NF_load_preds(pred_savename, predict_for_synthetic)
 
-#     total_loss[key] = np.concatenate((synth_loss[key], real_loss[key]), axis=0)
-#     total_loss[key]=synth_loss[key]
+    # overwrite specific_data as none if not plotting specific spectra
+    specific_data = specific_data if specific else None
 
-'''---------- PLOTTING PERFORMANCE ----------'''
+    xspec_data = load_xspec_preds(specific_data)
 
-# autoencoder performance - remember to change part of net_init to include autoencoder and not encoder
-plots.plot_performance(
-    'Loss',
-    net.losses[1][1:],
-    plots_dir=plots_directory,
-    train=net.losses[0][1:],
-    save_name='NF_perfomance.png'
-)
+    # to color data by certain parameters
+    kT = list(val_data['targets'][:,0,3])
+    nH = list(val_data['targets'][:,0,0])
+    gamma = list(val_data['targets'][:,0,1])
+    fsc = list(val_data['targets'][:,0,2])
+    nH_errors = list(val_data['targets'][:,1,0])
+    det_nums=[]
+    for spectrum in val_data['ids']:
+        with fits.open('/Users/work/Projects/FSPNet/data/spectra/'+spectrum) as file:
+            spectrum_info = file[1].header
+        det_nums.append(int(re.search(r'_d(\d+)', spectrum_info['RESPFILE']).group(1)))
+    det_nums = np.array(det_nums)[:,np.newaxis]
+    widths = get_energy_widths()[np.newaxis]
+    total_counts=np.sum(val_data['inputs'][:,0,:]*det_nums*widths, axis=-1)
 
-# performance_plot(
-#     'Loss',
-#     {key: value.tolist() for key, value in total_loss.items()},
-#     plots_dir=plots_directory,
-#     save_name='NF_allloss.png'
-# )
+    '''---------- PLOTTING ----------'''
+    # autoencoder performance - remember to change part of net_init to include autoencoder and not encoder
+    plots.plot_performance(
+        'Loss',
+        net.losses[1][1:],
+        plots_dir=plots_directory,
+        train=net.losses[0][1:],
+        save_name='NF_perfomance.png'
+    )
 
-# # decoder performance
-plots.plot_performance(
-    'Loss',
-    decoder.losses[1][1:],
-    plots_dir=plots_directory,
-    train=decoder.losses[0][1:],
-    save_name='NF_d_performance'
-)
+    # plot separate losses
+    # gets losses from the seperate losses attribute of the net class
+    # final_synth_epoch = 121
+    # final_real_epoch = len(net.losses[1])-final_synth_epoch
+    # synth_cut = final_synth_epoch*len(d_loaders[0])
+    # synth_loss ={}
+    # real_loss ={}
+    # total_loss = {}
+    # for key in ['reconstruct', 'flow', 'latent', 'bound', 'kl']:
+    #     synth_loss[key] = np.array(net.separate_losses[key])[:synth_cut].reshape(final_synth_epoch, -1)
+    #     real_loss[key] = np.array(net.separate_losses[key])[synth_cut:synth_cut+final_real_epoch*len(e_loaders[0])].reshape(final_real_epoch, -1)
+    #     synth_loss[key]=np.mean(synth_loss[key], axis=-1)
+    #     real_loss[key]=np.mean(real_loss[key], axis=-1)
+    #     total_loss[key] = np.concatenate((synth_loss[key], real_loss[key]), axis=0)
+    #     total_loss[key]=synth_loss[key]
 
-kT = list(data1['targets'][:,0,3])
-nH = list(data1['targets'][:,0,0])
-gamma = list(data1['targets'][:,0,1])
-fsc = list(data1['targets'][:,0,2])
-nH_errors = list(data1['targets'][:,1,0])
-gamma_errors = list(data1['targets'][:,1,1])
-fsc_errors = list(data1['targets'][:,1,2])
-kT_errors = list(data1['targets'][:,1,3])
-N_errors = list(data1['targets'][:,1,4])
+    # performance_plot(
+    #     'Loss',
+    #     {key: value.tolist() for key, value in total_loss.items()},
+    #     plots_dir=plots_directory,
+    #     save_name='NF_allloss.png'
+    # )
 
-det_nums=[]
-for spectrum in data1['ids']:
-    with fits.open('/Users/work/Projects/FSPNet/data/spectra/'+spectrum) as file:
-        spectrum_info = file[1].header
-    det_nums.append(int(re.search(r'_d(\d+)', spectrum_info['RESPFILE']).group(1)))
-det_nums = np.array(det_nums)[:,np.newaxis]
-widths = get_energy_widths()[np.newaxis]
-total_counts=np.sum(data1['inputs'][:,0,:]*det_nums*widths, axis=-1)
+    # # decoder performance
+    plots.plot_performance(
+        'Loss',
+        decoder.losses[1][1:],
+        plots_dir=plots_directory,
+        train=decoder.losses[0][1:],
+        save_name='NF_d_performance'
+    )
 
-if plot_synthetic:
+    # if plot_synthetic:
     # plotting comparison between parameters
     comparison_plot(
-        data1,
+        val_data,
         log_colour_map=True,
         colour_map=kT,
         colour_map_label='kT (keV)',
-        dir_name=plots_directory,
+        dir_name=os.path.join(plots_directory, 'comparisons/'),
         n_points=50,
         num_dist_specs=250
     )
@@ -789,237 +752,96 @@ if plot_synthetic:
         pred_savename=pred_savename,
     )
 
-    # all_param_samples = sample(data1,
-    #                         num_specs=3,
-    #                         num_samples=1,
-    #                         spec_scroll=SPEC_SCROLL)
+    all_param_samples = sample(val_data,
+                            num_specs=len(specific_data['ids']),
+                            num_samples=1,
+                            spec_scroll=SPEC_SCROLL)
 
-    # # single reconstructions using samples from all_param_samples
-    # recon_plot(
-    #     decoder.net,
-    #     net,
-    #     dir_name = plots_directory+'reconstructions/',
-    #     data = data1,
-    #     all_param_samples = all_param_samples,
-    #     data_dir = '/Users/work/Projects/FSPNet/data/spectra.pickle', # for synthetic data,
-    #     spec_scroll=SPEC_SCROLL
-    #     )
+    # single reconstructions using samples from all_param_samples
+    recon_plot(
+        decoder.net,
+        net,
+        dir_name = plots_directory+'reconstructions/',
+        data = val_data,
+        specific_data = specific_data,
+        all_param_samples = all_param_samples,
+        data_dir = '/Users/work/Projects/FSPNet/data/spectra.pickle' if predict_for_synthetic else '/Users/work/Projects/FSPNet/data/spectra/',
+        spec_scroll=SPEC_SCROLL
+        )
 
-    # # posterior predictive plots using 500 samples per reconstruction
-    # post_pred_samples = post_pred_plot(
-    #     decoder.net,
-    #     net,
-    #     dir_name = plots_directory+'reconstructions/',
-    #     data = data1,
-    # )
+    # posterior predictive plots using 100 samples per reconstruction
+    post_pred_samples = post_pred_plot(
+        decoder.net,
+        net,
+        dir_name = plots_directory+'reconstructions/',
+        data = val_data,
+        specific_data = specific_data,
+    )
 
+    # posterior predictive plots only using xspec to make reconstructions - not decoder
     post_pred_plot_xspec(
         dir_name = plots_directory+'reconstructions/',
-        data = data1,
+        data = val_data,
         specific_data = specific_data,
         post_pred_samples=post_pred_samples
     )
 
-    # # latent space corner plot
-    # latent_corner_plot(
-    #     dir_name = plots_directory+'distributions/',
-    #     data=data1,
-    #     )
-
-    # # scatter plot across all parameters in dataset
-    # param_pairs_plot(
-    #     data=data,
-    #     dir_name=plots_directory+'distributions/',
-    # )
-
-#     # rec_2d_plot(
-#     #     decoder=decoder.net,
-#     #     network=net,
-#     #     dir_name = plots_directory+'reconstructions/',
-#     #     data=data,
-#     # )
-
-if plot_specific:
-     # plotting comparison between parametrs
-    # comparison_plot(
-    #     data1,
-    #     dir_name=plots_directory,
-    #     specific_data=specific_data
-    # )
-
-    # all_param_samples = sample(specific_data,
-    #                         num_specs=len(specific_data['ids']),
-    #                         num_samples=1,
-    #                         spec_scroll=SPEC_SCROLL)
-
-    # comparison_plot(
-    #     data1,
-    #     log_colour_map=True,
-    #     colour_map=total_counts,
-    #     colour_map_label='Total count rate',
-    #     dir_name=plots_directory+'comparisons/',
-    #     num_dist_specs=250,
-    #     n_points=50,
-    # )
-
-    # coverage_plot(
-    #     dataset=e_dataset, 
-    #     loaders=e_loaders,
-    #     network = net,
-    #     dir_name=plots_directory,
-    #     pred_savename=pred_savename,
-    # )
-
-    # single reconstructions using samples from all_param_samples
-    # recon_plot(
-    #     decoder.net,
-    #     net,
-    #     dir_name = plots_directory+'reconstructions/',
-    #     specific_data = specific_data,
-    #     data = data1,
-    #     all_param_samples = all_param_samples
-    #     )
-
-    # # posterior predictive plots using 500 samples per reconstructio    
-    # post_pred_samples = post_pred_plot(
-    #     decoder.net,
-    #     net,
-    #     dir_name = plots_directory+'reconstructions/',
-    #     data = data1,
-    #     specific_data = specific_data
-    # )
-
-    # post_pred_plot_xspec(
-    #     dir_name = plots_directory+'reconstructions/',
-    #     data = data1,
-    #     specific_data = specific_data,
-    #     decoder=decoder.net,
-    #     net=net
-    # )
-
-    # # latent space corner plot
+    # latent space corner plot
     latent_corner_plot(
         dir_name = plots_directory+'distributions/',
-        specific_data = specific_data,
-        data=data1,
+        data=val_data,
         xspec_data=xspec_data,
-        # in_param_samples=all_param_samples,
-        min_quant=0.0005,
-        max_quant=0.9995,
-        )
+        specific_data=specific_data,
+    )
 
-#     # scatter plot across all parameters in dataset
-#     # param_pairs_plot(
-#     #     data=data,
-#     #     dir_name=plots_directory+'distributions/',
-#     # )
-
-# # elif plot_obsid:
-# #     # comparison_plot(
-# #     #     data1,
-# #     #     dir_name=plots_directory,
-# #     #     specific_data=obsid_data
-# #     # )
-
-# #     all_param_samples = sample(obsid_data,
-# #                             num_specs=len(obsid_data['id']),
-# #                             num_samples=1,
-# #                             spec_scroll=SPEC_SCROLL)
-
-#     # # # single reconstructions using samples from all_param_samples
-#     # recon_plot(
-#     #     decoder.net,
-#     #     net,
-#     #     dir_name = plots_directory+'reconstructions/',
-#     #     data = obsid_data,
-#     #     num_specs=len(obsid_data['id']),
-#     #     all_param_samples = all_param_samples
-#     #     )
-
-#     # # # posterior predictive plots using 500 samples per reconstruction
-#     # post_pred_samples = post_pred_plot(
-#     #     decoder.net,
-#     #     net,
-#     #     num_specs=len(obsid_data['id']),
-#     #     dir_name = plots_directory+'reconstructions/',
-#     #     data = obsid_data,
-#     # )
-
-#     # # # # latent space corner plot
-#     # latent_corner_plot(
-#     #     dir_name = plots_directory+'distributions/',
-#     #     data=obsid_data,
-#     #     num_specs=len(obsid_data['id']),
-#     #     in_param_samples= all_param_samples,
-#     #     )
-
-# else:
-#     # # plotting comparison between parametrs
-#     # comparison_plot(
-#     #     data1,
-#     #     dir_name=plots_directory,
-#     # )
-
-#     comparison_plot(
-#         data1,
-#         log_colour_map=True,
-#         colour_map=kT,
-#         colour_map_label='kT (keV)',
-#         dir_name=plots_directory,
-#         num_dist_specs=250,
-#         n_points=50,
-#     )
-
-    # all_param_samples = sample(data1,
-    #                         num_specs=3,
-    #                         num_samples=1,
-    #                         spec_scroll=SPEC_SCROLL)
-
-    # # # single reconstructions using samples from all_param_samples
-    # recon_plot(
-    #     decoder.net,
-    #     net,
-    #     dir_name = plots_directory+'reconstructions/',
-    #     data = data1,
-    #     all_param_samples = all_param_samples
-    #     )
-
-    # # # posterior predictive plots using 500 samples per reconstruction
-    # post_pred_samples = post_pred_plot(
-    #     decoder.net,
-    #     net,
-    #     dir_name = plots_directory+'reconstructions/',
-    #     data = data1,
-    # )
-
-    # # # latent space corner plot
-    # latent_corner_plot(
-    #     dir_name = plots_directory+'distributions/',
-    #     data=data1,
-    #     )
-
-    # # scatter plot across all parameters in dataset
+    # scatter plot across all target parameters in dataset
     # param_pairs_plot(
-    #     data=data,
-    #     dir_name=plots_directory+'distributions/',
+    #     data=val_data,
+    #     dir_name=plots_directory,
     # )
 
+    # 2D reconstruction plots - still working on this
+    # rec_2d_plot(
+    #     decoder=decoder.net,
+    #     network=net,
+    #     dir_name = plots_directory+'reconstructions/',
+    #     data=data,
+    # )
 
+    '''---------- pyxspec tests ----------'''
+    # import xspec
+    # xspec.Xset.chatter = 0
+    # xspec.Xset.logChatter = 0
 
+    # val_data['latent'] = val_data['latent'][:,0,:] # #np.median(val_data['latent'], axis = 1)
+    # val_data['targets'] = val_data['targets'][:,0,:]
+    # # for i in range(5):
+    # pyxspec_tests(val_data)
 
-'''---------- pyxspec tests ----------'''
-# import xspec
-# xspec.Xset.chatter = 0
-# xspec.Xset.logChatter = 0
+    # making predictions for timing purposes
+    # for i in range(5):
+    #     print('1000 samples:')
+    #     net.predict(e_loaders[1], num_samples=1000, inputs=True)
+    #     print('1 sample:')
+    #     net.predict(e_loaders[1], num_samples=1, inputs=True)
 
-# data1['latent'] = data1['latent'][:,0,:] # #np.median(data1['latent'], axis = 1)
-# data1['targets'] = data1['targets'][:,0,:]
-# # for i in range(5):
-# pyxspec_tests(data1)
+if __name__ == '__main__':
+    # settings
+    num_d_epochs = 400
+    num_e_epochs = 121
+    real_epochs = 216
+    learning_rate = 1.0e-3 # in config: 1e-4
+    train = False
+    predict = False
+    predict_for_synthetic = False
+    specific = True
+    SPEC_SCROLL = 0
 
-# making predictions for timing purposes
-# for i in range(5):
-#     print('1000 samples:')
-#     net.predict(e_loaders[1], num_samples=1000, inputs=True)
-#     print('1 sample:')
-#     net.predict(e_loaders[1], num_samples=1, inputs=True)
+    main(num_d_epochs, 
+         num_e_epochs, 
+         real_epochs, 
+         learning_rate, 
+         train, 
+         predict, 
+         predict_for_synthetic, 
+         specific)
