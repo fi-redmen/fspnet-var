@@ -33,7 +33,8 @@ LOG_PARAMS: list[int] = [0, 2, 3, 4]  # parameters to be plotted in log scale
 PARAM_LIMS: ndarray = np.array([[5.0e-3,75],[1.3,4],[1.0e-3,1],[2.5e-2, 4],[1.0e-2, 1.0e+10]])
 PARAM_NAMES : ndarray = np.array(['$N_{H}$ $(10^{22}\ cm^{-2})$', '$\Gamma$', '$f_{sc}$','$kT_{disk}$ $(keV)$','$N$'])
 COLORS_LIST = ['#0C5DA5']*17 #'#00B945', '#FF9500', '#9159ab', '#00A7C6'] # to colour different spectr differently
-SYNTHETIC_DIR: str = '/Users/work/Projects/FSPNet/data/synth_spectra_clean.pickle'
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SYNTHETIC_DIR: str = os.path.join(ROOT,'/data/synth_spectra_clean.pickle')
 
 NAMES = ['js_ni0100320101_0mpu7_goddard_GTI0.jsgrp','js_ni0103010102_0mpu7_goddard_GTI0.jsgrp','js_ni1014010102_0mpu7_goddard_GTI30.jsgrp',
          'js_ni1050360115_0mpu7_goddard_GTI9.jsgrp','js_ni1100320119_0mpu7_goddard_GTI26.jsgrp','js_ni1200120203_0mpu7_goddard_GTI0.jsgrp',
@@ -617,7 +618,7 @@ def recon_plot(
     specific_data: dict | None = None,
     all_param_samples: list | None = None,
     num_specs: int = 3,
-    data_dir: str = '/Users/work/Projects/FSPNet/data/spectra/',
+    data_dir: str = os.path.join(ROOT,'data/spectra/'),
     spec_scroll = 0,
     ):
     """
@@ -741,7 +742,7 @@ def post_pred_plot(
     n_samples: int | None = 100,
     post_pred_samples: list | ndarray | None = None,
     num_specs: int = 3,
-    data_dir: str = '/Users/work/Projects/FSPNet/data/spectra/'
+    data_dir: str = os.path.join(ROOT,'/data/spectra/')
     ):
     """
     Plots posterior predictive plots for either all data or specific data given.
@@ -860,7 +861,7 @@ def post_pred_plot_xspec(
     n_samples: int | None = 100,
     post_pred_samples: list | ndarray | None = None,
     num_specs: int = 3,
-    data_dir: str = '/Users/work/Projects/FSPNet/data/spectra/',
+    data_dir: str = os.path.join(ROOT,'data/spectra/'),
     net=None,
     decoder=None
     ):
@@ -992,7 +993,7 @@ def rec_2d_plot(
     dir_name: str,
     data: dict | None = None,
     specific_data: dict | None = None,
-    data_dir: str = '/Users/work/Projects/FSPNet/data/spectra/'
+    data_dir: str = os.path.join(ROOT,'data/spectra/')
     ):
     '''
     Plot 2D color plots of spectra reconstructions from latent parameters to show multiple spectra together
@@ -1094,7 +1095,7 @@ def coverage_plot(
     loaders,
     network,
     dir_name,
-    coverage_dir = '/Users/work/Projects/FSPNet/coverages/',
+    coverage_dir = os.path.join(ROOT,'coverages/'),
     pred_savename='noname',
     overwrite=False
     ):
