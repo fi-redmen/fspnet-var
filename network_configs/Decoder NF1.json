@@ -1,0 +1,81 @@
+{
+  "net": {
+    "description": "Same as NF0 but with GELU activations",
+    "checkpoints": 1,
+    "Linear": {
+      "dropout": 0.05,
+      "activation": "GELU"
+    },
+    "Recurrent": {
+      "activation": "GELU"
+    }
+  },
+  "layers": [
+    {
+      "type": "Reshape",
+      "shape": [1,-1]
+    },
+    {
+      "type": "Linear",
+      "factor": 0.5,
+      "dropout": 0
+    },
+    {
+      "type": "Linear",
+      "factor": 0.5,
+      "dropout": 0
+    },
+    {
+      "type": "Reshape",
+      "shape": [1,-1]
+    },
+    {
+      "type": "Linear",
+      "factor": 1
+    },
+    {
+      "type": "Checkpoint"
+    },
+    {
+      "type": "Linear",
+      "factor": 1,
+      "dropout": 0
+    },
+    {
+      "type": "Checkpoint"
+    },
+    {
+      "type": "Linear",
+      "factor": 1
+    },
+    {
+      "type": "Shortcut",
+      "layer": 0
+    },
+    {
+      "type": "Shortcut",
+      "layer": 1
+    },
+    {
+      "type": "Reshape",
+      "shape": [1, -1]
+    },
+    {
+      "type": "Recurrent",
+      "bidirectional": "mean"
+    },
+    {
+      "type": "Reshape",
+      "shape": [-1]
+    },
+    {
+      "type": "Linear",
+      "factor": 1,
+      "dropout": 0
+    },
+    {
+      "type": "Reshape",
+      "shape": [1, -1]
+    }
+  ]
+}
