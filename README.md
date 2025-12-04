@@ -19,5 +19,3 @@
 **xspec_funcs**: Functions that use xspec
 
 **network_configs**: Neural network configurations
-
-**using_code_**: outdated
