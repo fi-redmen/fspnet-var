@@ -1,13 +1,13 @@
 
-### Requirements
+## Requirements
 - Install dependencies:
   ```pip install -r requirements.txt```
 - PyXspec dependency:
   Xspec from HEASoft provided by NASA
 
-### Data compatibility
+## Data compatibility
 
-### File Descriptions
+## File Descriptions
 **Main_NF**: Trains variational autoencoder with normalizing flow network network, makes predictions, and calls functions from VAE_plots for plotting
 
 **Main_VAE**: Trains vanilla variational autoencoder network, makes predictions, and calls functions from VAE_plots for plotting - outdateed so might have issues
