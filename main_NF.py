@@ -50,7 +50,8 @@ import netloader.networks as nets
 from netloader.utils.utils import progress_bar, save_name
 
 plt.style.use(["science", "grid", 'no-latex'])
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ROOT = os.path.dirname(os.path.abspath(__file__))
+
 
 class GaussianNLLLoss(loss_funcs.BaseLoss):
     """
@@ -639,9 +640,9 @@ def NF_predict(net, e_dataset, d_dataset, e_loaders, d_loaders, names, object_na
     # reset transforms 
     net.transforms = net_transforms
 
-    with open(os.path.join(ROOT,'/predictions/specific_',pred_savename,synth_str,'.pickle'), 'wb') as file:
+    with open(os.path.join(ROOT,'predictions/specific_'+pred_savename+synth_str+'.pickle'), 'wb') as file:
         pickle.dump(specific_data, file)
-    with open(os.path.join(ROOT,'/predictions/val_',pred_savename,synth_str,'.pickle'), 'wb') as file:
+    with open(os.path.join(ROOT,'predictions/val_'+pred_savename+synth_str+'.pickle'), 'wb') as file:
         pickle.dump(val_data, file)
     
     return val_data, specific_data
@@ -661,9 +662,9 @@ def NF_load_preds(pred_savename, predict_for_synthetic=False):
         Tuple containing validation and specific data dictionaries.
     """
     synth_str = '_synthetic_' if predict_for_synthetic else ''
-    with open(os.path.join(ROOT,'/predictions/specific_',pred_savename,synth_str,'.pickle'), 'rb') as file:
+    with open(os.path.join(ROOT,'predictions/specific_'+pred_savename+synth_str+'.pickle'), 'rb') as file:
         specific_data = pickle.load(file)
-    with open(os.path.join(ROOT,'/predictions/val_',pred_savename,synth_str,'.pickle'), 'rb') as file:
+    with open(os.path.join(ROOT,'predictions/val_'+pred_savename+synth_str+'.pickle'), 'rb') as file:
         val_data = pickle.load(file)
 
     if 'latent' not in specific_data and 'distributions' in specific_data:
@@ -690,7 +691,7 @@ def load_xspec_preds(specific_data):
         # note:
         # xspec_preds is with default values and fitting with 1000 iterations before chain
         # xspec_preds1 is with precalulated values and fitting with 1000 iterations before chain
-    with open(os.path.join(ROOT,'/predictions/xspec_preds1.pickle'), 'rb') as file:
+    with open(os.path.join(ROOT,'predictions/xspec_preds1.pickle'), 'rb') as file:
         xspec_data_unordered = pickle.load(file)
 
     # making the same order as specific_data
@@ -794,7 +795,7 @@ def main(num_d_epochs=150, num_e_epochs=150, real_epochs=150, learning_rate=0.00
     nH_errors = list(val_data['targets'][:,1,0])
     det_nums=[]
     for spectrum in val_data['ids']:
-        with fits.open(os.path.join(ROOT,'data','spectra',spectrum) as file:
+        with fits.open(os.path.join(ROOT,'data','spectra',spectrum)) as file:
             spectrum_info = file[1].header
         det_nums.append(int(re.search(r'_d(\d+)', spectrum_info['RESPFILE']).group(1)))
     det_nums = np.array(det_nums)[:,np.newaxis]
