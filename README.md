@@ -3,7 +3,7 @@
 - Install dependencies:
   ```pip install -r requirements.txt```
 - PyXspec dependency:
-  Xspec from HEASoft provided by NASA
+  Xspec from [HEASoft](https://heasarc.gsfc.nasa.gov/docs/software/xspec/index.html) provided by NASA
 
 ## Data compatibility
 
