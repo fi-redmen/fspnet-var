@@ -1,0 +1,11 @@
+astropy~=7.1.0
+joblib~=1.5.2
+pandas~=2.3.2
+matplotlib~=3.10.6
+PyYAML~=6.0.2
+optuna~=4.5.0
+lampe~=0.9.0
+chainconsumer~=1.2.3
+numpy~=2.3.3
+netloader@git+https://github.com/EthanTreg/PyTorch-Network-Loader@v3.2.4  
+sciplots@git+https://github.com/EthanTreg/Science-Plots/
