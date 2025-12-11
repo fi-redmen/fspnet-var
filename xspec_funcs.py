@@ -69,38 +69,6 @@ def recon(
 
     return energy, recon
 
-data_dir = '/Users/astroai/Projects/FSPNet/data/spectra/'
-with fits.open('/Users/astroai/Projects/FSPNet/data/spectra/js_ni0100320101_0mpu7_goddard_GTI0.jsgrp') as file:
-    spectrum_info = file[1].header
-
-response=data_dir + spectrum_info['RESPFILE'],
-arf=data_dir + spectrum_info['ANCRFILE'],
-background=data_dir + spectrum_info['BACKFILE']
-
-os.chdir(data_dir)
-s1 = xspec.Spectrum("/Users/astroai/Projects/FSPNet/data/spectra/js_ni1014010102_0mpu7_goddard_GTI30.jsgrp")
-xspec.AllModels.lmod("simplcutx", "/Users/astroai/Downloads/simplcutx/")
-xspec_model = xspec.Model("tbabs(simplcutx(ezdiskbb))")
-# set the correct start parameters
-xspec_model.setPars([1.0, 2.5, 0.5 , 0.0, 100.0 , 1.0, 1.0])
-xspec_model.simplcutx.ReflFrac.frozen = True
-xspec_model.simplcutx.kT_e.frozen = True
-
-xspec.AllData.ignore('**-0.3 10.0-**')
-xspec.AllData.ignore('bad')
-xspec.Fit.renorm()
-xspec.Fit.nIterations = 1000
-xspec.Fit.perform()
-
-# s1.background = background
-# s1.response = response
-# s1.response.arf = arf
-
-# nicer_d48_1695443832.rmf
-# '/Users/astroai/Projects/FSPNet/data/spectra/nicer_d48_1695443832.rmf'
-# '/Users/astroai/Projects/FSPNet/data/spectra/js_ni0100320101_0mpu7_goddard_GTI0.bg'
-# '/Users/astroai/Projects/FSPNet/data/spectra/nicer_d48_1695443832.arf'
-
 # def true_posterior(
 #     spectrum_dir : str,
 #     spectrum_name : str,
