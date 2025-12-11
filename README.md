@@ -19,6 +19,4 @@ FSPNet-Var is a variational autoencoder network, building on the [FSPNet](https:
 
 **MCMC_chains**: Runs MCMC chains for certain spectra using pyxspec
 
-**xspec_funcs**: Functions that use xspec
-
 **network_configs**: Neural network configurations
