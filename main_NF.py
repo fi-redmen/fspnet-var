@@ -1,6 +1,7 @@
 # from NFautoencoder import NFautoencoder, net_init, GaussianNLLLoss, MSELoss
 # import pandas as pd
 # from netloader_tests import TestConfig, gen_indexes, mod_network
+from networkx import config
 import xspec
 from fspnet.spectrum_fit import init 
 
@@ -10,48 +11,33 @@ import pickle
 import random
 import torch
 import sciplots
-from astropy.io import fits
 import re
+import matplotlib.pyplot as plt
 
-import netloader.networks as nets
-from netloader import transforms
-from netloader.utils.utils import get_device
-
+from numpy import ndarray
+from torch import Tensor, nn, optim
 from torch.utils.data import DataLoader, Subset
-from torch import nn, optim
-import lampe
+from time import time
+from typing import Any
+
+from astropy.io import fits
+
+import netloader.transforms as transforms
+import netloader.networks as nets
+import netloader.loss_funcs as loss_funcs
+from netloader.network import Network
+from netloader.utils.utils import progress_bar, save_name, get_device
 
 from fspnet.utils import plots
 from fspnet.utils.utils import open_config
 from fspnet.utils.data import SpectrumDataset, loader_init
-from fspnet.spectrum_fit import pyxspec_tests
+from fspnet.spectrum_fit import pyxspec_tests, AutoencoderNet, Tensor
 
-import matplotlib.pyplot as plt
-
-from VAE_plots import comparison_plot, recon_plot, post_pred_plot, latent_corner_plot, rec_2d_plot, param_pairs_plot 
-from VAE_plots import performance_plot, post_pred_plot_xspec, coverage_plot
-from NF_utils.misc_utils import sample, get_energy_widths
-
-import numpy as np
-from numpy import ndarray
-from torch import Tensor, nn, optim
-from torch.utils.data import DataLoader
-from time import time
-from typing import Any
-from fspnet.spectrum_fit import AutoencoderNet, Tensor
-
-import torch
-
-from fspnet.utils.data import SpectrumDataset
-from fspnet.utils.utils import open_config
-from netloader import loss_funcs, transforms
-from netloader.network import Network
-import netloader.networks as nets
-from netloader.utils.utils import progress_bar, save_name
+import utils.plots_var as plots_var
+from utils.misc_utils import sample, get_energy_widths
 
 plt.style.use(["science", "grid", 'no-latex'])
-ROOT = os.path.dirname(os.path.abspath(__file__))
-
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 class GaussianNLLLoss(loss_funcs.BaseLoss):
     """
@@ -82,7 +68,7 @@ class MSELoss(loss_funcs.MSELoss):
     def forward(self, output: Tensor, target: Tensor) -> Tensor:
         return self._loss_func(output[:, 0], target[:, 0])
 
-def init(config: dict | str = './config.yaml') -> tuple[
+def init(config: dict | str = '../config.yaml') -> tuple[
         tuple[DataLoader, DataLoader],
         tuple[DataLoader, DataLoader],
         nets.BaseNetwork,
@@ -202,7 +188,7 @@ def net_init(
             overwrite=True,
             learning_rate=learning_rate,
             description=description,
-            verbose='epoch',
+            verbose='progress',
             transform=transform,
         )
 
@@ -463,6 +449,8 @@ class NFautoencoder(nets.Autoencoder):
         for i in range(len(self.losses[1])):
             losses.append(float(np.mean(self.losses[1][i-10:i])))
 
+        self._start_epoch=self._epoch
+
         # Train for each epoch
         for i in range(self._epoch, epochs):
             t_initial = time()
@@ -490,26 +478,30 @@ class NFautoencoder(nets.Autoencoder):
                     i,
                     epochs,
                     text=f'Epoch [{self._epoch}/{epochs}]\t'
-                         f'Training loss: {self.losses[0][-1]:.3e}\t'
-                         f'Validation loss: {self.losses[1][-1]:.3e}\t'
+                         f'Training: {self.losses[0][-1]:.3e}\t'
+                         f'Validation: {self.losses[1][-1]:.3e}\t'
                          f'Time: {time() - t_initial:.1f}',
                 )
 
             losses.append(float(np.mean(self.losses[1][-10:]))) # averages over 10 last values
 
             # End plateaued networks early
-            if (net._epoch > net.scheduler.patience * 2 and
-                net._epoch > 300 + net.scheduler.patience * 2 and # added for after synthetic train
-                losses[-net.scheduler.patience * 2] < losses[-1]):
+            if (self._epoch > self._start_epoch + self.scheduler.patience * 2 and
+                self.losses[-self.scheduler.patience * 2] < self.losses[-1]):
 
                 print('Trial plateaued, ending early...')
                 break
+
+        self._start_epoch=self._epoch
 
         self.train(False)
         final_loss = self._train_val(loaders[1])
         print(f'\nFinal validation loss: {final_loss:.3e}')
 
-def NF_train(decoder, net, e_loaders, d_loaders, num_d_epochs, num_e_epochs, real_epochs, learning_rate):
+def NF_train(decoder, net, 
+             e_loaders, d_loaders, 
+             learning_rate,
+             config: str = '../config.yaml'):
     """
     Trains the normalising flow network.
 
@@ -532,36 +524,60 @@ def NF_train(decoder, net, e_loaders, d_loaders, num_d_epochs, num_e_epochs, rea
     learning_rate : float
         The learning rate for the optimizer.
     """
+
+    if isinstance(config, str):
+        _, config = open_config('spectrum-fit',config)
+
+    n_epochs = ['training']['epochs']
+    learning_rate = config['training']['learning-rate']
+
     # train decoder
-    decoder.training(num_d_epochs, d_loaders) 
+    decoder.training(n_epochs, d_loaders) 
+    # plot decoder performance
+    # plots.plot_performance(
+    #     'Loss',
+    #     decoder.losses[1][1:],
+    #     plots_dir= config['output']['plots-directory'],
+    #     train=decoder.losses[0][1:],
+    #     save_name='dec_performance')
 
     # # #fix decoder's weights so they dont change while training the encoder
     net.net.net[1] = decoder.net
     net.net.net[1].requires_grad_(False)
 
-    #setting up autoencoder optimiser correctly - likely to not be needed
-    if net.epochs==0:
+    #setting up autoencoder optimiser correctly - might not need
+    if net._epoch==0:
         net.optimiser = optim.AdamW(net.net.parameters(), lr=learning_rate)
         net.scheduler = optim.lr_scheduler.ReduceLROnPlateau(net.optimiser, min_lr=1e-6,)
 
     # train autoencoder on synthetic
-    net.training(num_e_epochs, d_loaders)
+    net.training(n_epochs, d_loaders)
 
-    '''uncoment this to train only first few layers of encoder - check which layers are indexed''' 
+    '''to train only first few layers of encoder - check which layers are indexed''' 
     # net.net.net[0].net[2:].requires_grad_(False)
-    # net.net.net[0].net[12].requires_grad_(True)
-    ''' uncomment this to use unsupervised training'''
+    '''uncomment this to use unsupervised training'''
     # net.latent_loss = 0   # for unsupervised
     # net.flowlossweight = 0
     '''train on real'''
     # rest optimiser and train autoencoder on real
-    if net.get_epochs() == num_e_epochs:
+    if net.get_epochs() == n_epochs:
         net.optimiser = optim.AdamW(net.net.parameters(), lr=learning_rate*0.1)
         net.scheduler = optim.lr_scheduler.ReduceLROnPlateau(net.optimiser, factor=0.5, min_lr=1e-6)
-    net.training(num_e_epochs+real_epochs, e_loaders)
+    net.training(n_epochs*2, e_loaders)
+
+    # plot autoencoder performance - remember to change part of net_init to correspond to encoder only vs autoencoder
+    # plots.plot_performance(
+    #     'Loss',
+    #     net.losses[1][1:],
+    #     plots_dir=config['output']['plots-directory'],
+    #     train=net.losses[0][1:],
+    #     save_name='net_perfomance.png')
 
 #--- making predictions
-def NF_predict(net, e_dataset, d_dataset, e_loaders, d_loaders, names, object_names, pred_savename, predict_for_synthetic=False):
+def NF_predict(net, 
+               e_dataset, d_dataset, 
+               e_loaders, d_loaders, 
+               names, object_names, pred_savename, predict_for_synthetic=False):
     """
     Makes and saves predictions from the normalising flow network.
     Parameters
@@ -604,15 +620,16 @@ def NF_predict(net, e_dataset, d_dataset, e_loaders, d_loaders, names, object_na
     for key in net.transforms:      # clear transforms
         net.transforms[key] = None
 
+    net._verbose = 'full'   # allow progress bar to print while network is predicting
+
     # makes predictions (transformed)
-    # train_data = net.predict(pred_loader[0], num_samples=1000, inputs=True)
     val_data = net.predict(pred_loader[1], num_samples=5000, inputs=True)
     data_idxs = np.arange(len(e_dataset))
     specific_subset = Subset(e_dataset, data_idxs[np.isin(e_dataset.names, names)].tolist())
     specific_loader = DataLoader(specific_subset, batch_size=64, shuffle=False)
     specific_data = net.predict(specific_loader, num_samples=5000, inputs=True)
     
-    # untransforms data
+    # untransforms predictions
     for pred_data in [specific_data, val_data]:
         for key, transform in net_transforms.items():
             if transform is None:
@@ -691,7 +708,7 @@ def load_xspec_preds(specific_data):
         # note:
         # xspec_preds is with default values and fitting with 1000 iterations before chain
         # xspec_preds1 is with precalulated values and fitting with 1000 iterations before chain
-    with open(os.path.join(ROOT,'predictions/xspec_preds1.pickle'), 'rb') as file:
+    with open(os.path.join(ROOT,'predictions/xspec_preds.pickle'), 'rb') as file:
         xspec_data_unordered = pickle.load(file)
 
     # making the same order as specific_data
@@ -712,11 +729,41 @@ def load_xspec_preds(specific_data):
 
     return xspec_data
 
-def main(num_d_epochs=150, num_e_epochs=150, real_epochs=150, learning_rate=0.001, train=False, predict=False, predict_for_synthetic=False, specific=True):
+def main(num_d_epochs=250, num_e_epochs=250, real_epochs=250, learning_rate=0.001, 
+         train=False, predict=False, predict_for_synthetic=False, specific=True,
+         num_cycles=1):
 
-    #initialise data loaders and networks
-    e_dataset, d_dataset, e_loaders, d_loaders, decoder, net = init()
-    
+    if train:
+        if num_cycles>0:
+            _, config = open_config('spectrum-fit', '../config.yaml')
+            config['training']['encoder-load'] = 0
+            config['training']['decoder-load'] = 0
+            
+            for cycle_num in range(num_cycles):
+                # Set load and save names
+                config['training']['encoder-save'] = str(config['training']['encoder-save']) + '_test_' + str(cycle_num + 1)   
+                config['training']['decoder-save'] = str(config['training']['decoder-save']) + '_test_' + str(cycle_num + 1)
+                config['training']['description'] = 'test cycle '+str(cycle_num+1)+'\n Transfer learning with decoder trained on synthetic data'
+
+                #initialise data loaders and networks
+                e_dataset, d_dataset, e_loaders, d_loaders, decoder, net = init(config)
+
+                print(f'Cycle {cycle_num + 1}/{num_cycles} initialized.')
+                NF_train(decoder, net, 
+                        e_loaders, d_loaders,
+                        learning_rate,
+                        config)
+                print(f'Cycle {cycle_num + 1}/{num_cycles} completed.')
+        else: 
+            e_dataset, d_dataset, e_loaders, d_loaders, decoder, net = init()
+
+            NF_train(decoder, net, 
+                        e_loaders, d_loaders, 
+                        num_d_epochs, num_e_epochs, real_epochs, 
+                        learning_rate)
+    else: 
+        e_dataset, d_dataset, e_loaders, d_loaders, decoder, net = init()
+
     # saves name of predictions as encoder name_decoder name
     synth_plot_str = 'synthetic'  if predict_for_synthetic else 'real'
     pred_savename = os.path.basename(net.save_path)[:-4]+' '+os.path.basename(decoder.save_path)[:-4] #'Encoder NF0_2' #
@@ -730,11 +777,11 @@ def main(num_d_epochs=150, num_e_epochs=150, real_epochs=150, learning_rate=0.00
     names = ['js_ni0100320101_0mpu7_goddard_GTI0.jsgrp','js_ni0103010102_0mpu7_goddard_GTI0.jsgrp','js_ni1014010102_0mpu7_goddard_GTI30.jsgrp','js_ni1050360115_0mpu7_goddard_GTI9.jsgrp','js_ni1100320119_0mpu7_goddard_GTI26.jsgrp','js_ni1200120203_0mpu7_goddard_GTI0.jsgrp','js_ni1200120203_0mpu7_goddard_GTI10.jsgrp','js_ni1200120203_0mpu7_goddard_GTI11.jsgrp','js_ni1200120203_0mpu7_goddard_GTI13.jsgrp','js_ni1200120203_0mpu7_goddard_GTI1.jsgrp','js_ni1200120203_0mpu7_goddard_GTI3.jsgrp','js_ni1200120203_0mpu7_goddard_GTI4.jsgrp','js_ni1200120203_0mpu7_goddard_GTI5.jsgrp','js_ni1200120203_0mpu7_goddard_GTI6.jsgrp','js_ni1200120203_0mpu7_goddard_GTI7.jsgrp','js_ni1200120203_0mpu7_goddard_GTI8.jsgrp','js_ni1200120203_0mpu7_goddard_GTI9.jsgrp']
     object_names=['Cyg X-1 (2017)','GRS 1915+105','LMC X-3','MAXI J1535-571','Cyg X-1 (2018)','MAXI J1820 0','MAXI J1820 10','MAXI J1820 11','MAXI J1820 13','MAXI J1820 1','MAXI J1820 3','MAXI J1820 4','MAXI J1820 5','MAXI J1820 6','MAXI J1820 7','MAXI J1820 8','MAXI J1820 9']
 
-    if train:
-        NF_train(decoder, net, e_dataset, d_dataset, e_loaders, d_loaders, num_d_epochs, num_e_epochs, real_epochs, learning_rate)
-        val_data, specific_data = NF_predict(net, e_dataset, d_dataset, e_loaders, d_loaders, names, object_names, predict_for_synthetic)
-    elif predict:
-        val_data, specific_data = NF_predict(net, e_dataset, d_dataset, e_loaders, d_loaders, names, object_names, predict_for_synthetic)
+    if predict or train:
+        val_data, specific_data = NF_predict(net, 
+                                             e_dataset, d_dataset, 
+                                             e_loaders, d_loaders, 
+                                             names, object_names, pred_savename, predict_for_synthetic)
     else:
         val_data, specific_data = NF_load_preds(pred_savename, predict_for_synthetic)
 
@@ -744,14 +791,6 @@ def main(num_d_epochs=150, num_e_epochs=150, real_epochs=150, learning_rate=0.00
     xspec_data = load_xspec_preds(specific_data)
 
     '''---------- PLOTTING ----------'''
-    # autoencoder performance - remember to change part of net_init to correspond to encoder only vs autoencoder
-    plots.plot_performance(
-        'Loss',
-        net.losses[1][1:],
-        plots_dir=plots_directory,
-        train=net.losses[0][1:],
-        save_name='NF_perfomance.png'
-    )
 
     # plot separate losses
     # gets losses from the seperate losses attribute of the net class
@@ -770,112 +809,90 @@ def main(num_d_epochs=150, num_e_epochs=150, real_epochs=150, learning_rate=0.00
     #     total_loss[key]=synth_loss[key]
 
     # separate losses performance plot
-    # performance_plot(
+    # plots_var.performance_plot(
     #     'Loss',
     #     {key: value.tolist() for key, value in total_loss.items()},
     #     plots_dir=plots_directory,
-    #     save_name='NF_allloss.png'
-    # )
+    #     save_name='NF_allloss.png')
 
-    # decoder performance
-    plots.plot_performance(
-        'Loss',
-        decoder.losses[1][1:],
-        plots_dir=plots_directory,
-        train=decoder.losses[0][1:],
-        save_name='NF_d_performance'
-    )
+    # # plotting comparison between parameters
+    # # to color data by certain parameters
+    # kT = list(val_data['targets'][:,0,3])
+    # nH = list(val_data['targets'][:,0,0])
+    # gamma = list(val_data['targets'][:,0,1])
+    # fsc = list(val_data['targets'][:,0,2])
+    # nH_errors = list(val_data['targets'][:,1,0])
+    # det_nums=[]
+    # for spectrum in val_data['ids']:
+    #     with fits.open(os.path.join(ROOT,'data','spectra',spectrum)) as file:
+    #         spectrum_info = file[1].header
+    #     det_nums.append(int(re.search(r'_d(\d+)', spectrum_info['RESPFILE']).group(1)))
+    # det_nums = np.array(det_nums)[:,np.newaxis]
+    # widths = get_energy_widths()[np.newaxis]
+    # total_counts=np.sum(val_data['inputs'][:,0,:]*det_nums*widths, axis=-1)
 
-    # plotting comparison between parameters
-    # to color data by certain parameters
-    kT = list(val_data['targets'][:,0,3])
-    nH = list(val_data['targets'][:,0,0])
-    gamma = list(val_data['targets'][:,0,1])
-    fsc = list(val_data['targets'][:,0,2])
-    nH_errors = list(val_data['targets'][:,1,0])
-    det_nums=[]
-    for spectrum in val_data['ids']:
-        with fits.open(os.path.join(ROOT,'data','spectra',spectrum)) as file:
-            spectrum_info = file[1].header
-        det_nums.append(int(re.search(r'_d(\d+)', spectrum_info['RESPFILE']).group(1)))
-    det_nums = np.array(det_nums)[:,np.newaxis]
-    widths = get_energy_widths()[np.newaxis]
-    total_counts=np.sum(val_data['inputs'][:,0,:]*det_nums*widths, axis=-1)
+    # plots_var.comparison_plot(
+    #     val_data,
+    #     specific_data=specific_data,
+    #     log_colour_map=True,
+    #     colour_map=kT,
+    #     colour_map_label='kT (keV)',
+    #     dir_name=os.path.join(plots_directory, 'comparisons/'),
+    #     n_points=50,
+    #     num_dist_specs=250)
 
-    comparison_plot(
-        val_data,
-        specific_data=specific_data,
-        log_colour_map=True,
-        colour_map=kT,
-        colour_map_label='kT (keV)',
-        dir_name=os.path.join(plots_directory, 'comparisons/'),
-        n_points=50,
-        num_dist_specs=250
-    )
+    # plots_var.coverage_plot(
+    #     dataset=d_dataset, 
+    #     loaders=d_loaders,
+    #     network = net,
+    #     dir_name=plots_directory,
+    #     pred_savename=pred_savename)
 
-    coverage_plot(
-        dataset=d_dataset, 
-        loaders=d_loaders,
-        network = net,
-        dir_name=plots_directory,
-        pred_savename=pred_savename,
-    )
+    # all_param_samples = sample(specific_data if specific else val_data,
+    #                         num_specs=len(specific_data['ids']),
+    #                         num_samples=1)
 
-    all_param_samples = sample(specific_data if specific else val_data,
-                            num_specs=len(specific_data['ids']),
-                            num_samples=1,
-                            spec_scroll=SPEC_SCROLL)
+    # # single reconstructions using samples from all_param_samples
+    # plots_var.recon_plot(
+    #     decoder.net,
+    #     net,
+    #     dir_name = plots_directory+'reconstructions/',
+    #     data = val_data,
+    #     specific_data = specific_data,
+    #     all_param_samples = all_param_samples,
+    #     data_dir = os.path.join(ROOT,'data','spectra.pickle') if predict_for_synthetic else os.path.join(ROOT,'data','spectra/'))
 
-    # single reconstructions using samples from all_param_samples
-    recon_plot(
-        decoder.net,
-        net,
-        dir_name = plots_directory+'reconstructions/',
-        data = val_data,
-        specific_data = specific_data,
-        all_param_samples = all_param_samples,
-        data_dir = os.path.join(ROOT,'data','spectra.pickle') if predict_for_synthetic else os.path.join(ROOT,'data','spectra/'),
-        spec_scroll=SPEC_SCROLL
-        )
+    # # posterior predictive plots using 100 samples per reconstruction
+    # plots_var.post_pred_samples = post_pred_plot(
+    #     decoder.net,
+    #     net,
+    #     dir_name = plots_directory+'reconstructions/',
+    #     data = val_data,
+    #     specific_data = specific_data)
 
-    # posterior predictive plots using 100 samples per reconstruction
-    post_pred_samples = post_pred_plot(
-        decoder.net,
-        net,
-        dir_name = plots_directory+'reconstructions/',
-        data = val_data,
-        specific_data = specific_data,
-    )
+    # # posterior predictive plots only using xspec to make reconstructions - not decoder
+    # plots_var.post_pred_plot_xspec(
+    #     dir_name = plots_directory+'reconstructions/',
+    #     data = val_data,
+    #     specific_data = specific_data,
+    #     post_pred_samples=post_pred_samples)
 
-    # posterior predictive plots only using xspec to make reconstructions - not decoder
-    post_pred_plot_xspec(
-        dir_name = plots_directory+'reconstructions/',
-        data = val_data,
-        specific_data = specific_data,
-        post_pred_samples=post_pred_samples
-    )
-
-    # latent space corner plot
-    latent_corner_plot(
-        dir_name = plots_directory+'distributions/',
-        data=val_data,
-        xspec_data=xspec_data,
-        specific_data=specific_data,
-    )
+    # # latent space corner plot
+    # plots_var.latent_corner_plot(
+    #     dir_name = plots_directory+'distributions/',
+    #     data=val_data,
+    #     xspec_data=xspec_data,
+    #     specific_data=specific_data)
 
     # scatter plot across all target parameters in dataset
-    # param_pairs_plot(
+    # plots_var.param_pairs_plot(
     #     data=val_data,
-    #     dir_name=plots_directory,
-    # )
+    #     dir_name=plots_directory)
 
-    # 2D reconstruction plots - still working on this
-    # rec_2d_plot(
-    #     decoder=decoder.net,
-    #     network=net,
+    # # 2D reconstruction plots - still working on this
+    # plots_var.rec_2d_plot(
     #     dir_name = plots_directory+'reconstructions/',
-    #     data=data,
-    # )
+    #     data=val_data)
 
     '''---------- pyxspec tests ----------'''
     # import xspec
@@ -884,7 +901,6 @@ def main(num_d_epochs=150, num_e_epochs=150, real_epochs=150, learning_rate=0.00
 
     # val_data['latent'] = val_data['latent'][:,0,:] # #np.median(val_data['latent'], axis = 1)
     # val_data['targets'] = val_data['targets'][:,0,:]
-    # # for i in range(5):
     # pyxspec_tests(val_data)
 
     # making predictions for timing purposes
@@ -896,21 +912,13 @@ def main(num_d_epochs=150, num_e_epochs=150, real_epochs=150, learning_rate=0.00
 
 if __name__ == '__main__':
     # settings
-    num_d_epochs = 400
-    num_e_epochs = 121
-    real_epochs = 216
-    learning_rate = 1.0e-3 # in config: 1e-4
-    train = False
+    train = True
     predict = False
     predict_for_synthetic = False
     specific = True
-    SPEC_SCROLL = 0
 
-    main(num_d_epochs, 
-         num_e_epochs, 
-         real_epochs, 
-         learning_rate, 
-         train, 
-         predict, 
-         predict_for_synthetic, 
-         specific)
+    main(train=train, 
+         predict=predict, 
+         predict_for_synthetic=predict_for_synthetic, 
+         specific=specific,
+         num_cycles=5)
