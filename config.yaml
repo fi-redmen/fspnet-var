@@ -1,0 +1,304 @@
+# Configuration file for all scripts
+# All file paths are relative to the parent script directory, unless otherwise stated
+---
+global-variable :
+  network-variables:
+    # File name for decoder model to load
+    - &decoder_name 'Decoder NF1'
+    # File name for encoder model to load
+    - &encoder_name 'Encoder NF4'
+    # Path to the configuration files for the encoder and decoder
+    - &network_configs_directory '../network_configs'
+    # Path to the Python interpreter
+    - &python-path '/opt/anaconda3/envs/FSPNet/bin/python'
+  data-variables:
+    # Path to real spectra as a pickled dictionary containing the spectra (spectra),
+    # can also contain parameters (params) for supervised learning and
+    # spectra names (names) if fitted parameters are provided for specific files in
+    # spectra_directory and tests in spectrum-fit is True
+    - &spectra_data_path '../data/spectra.pickle'
+    # Path to synthetic spectra with noise with the same format as spectra_data_path
+    #  &synthetic_data_path '../data/synth_spectra.pickle'
+    - &synthetic_data_path '../data/synth_spectra_bias.pickle'
+    # Path to synthetic spectra without noise with the same format as spectra_data_path
+    # - &clean_synthetic_data_path '../data/synth_spectra_clean.pickle'
+    - &clean_synthetic_data_path '../data/synth_spectra_clean.pickle'
+    # - &andrea_spectra_path './data/andrea_spectra.pkl'
+    # Path to the directory containing spectra fits files
+    - &spectra_data_directory '../data/spectra/'
+  model-variables:
+    # Number of free parameters
+    # - &parameter_number 7
+    - &parameter_number 5
+    # Xspec model to use
+    # - &model_name 'tbabs(simplcutx(ezdiskbb)*gabs*gabs)'
+    - &model_name 'tbabs(simplcutx(ezdiskbb))'
+    # Name of custom model that has to be loaded, can be empty
+    - &custom_model_name 'simplcutx' #'jscutx'
+    # Directory to custom model, can be empty
+    - &model_directory "../../Xspec_model/" 
+    # Which model free parameter indices to take the log of, starting from 0
+    - &log_parameters
+      - 0
+      - 2
+      - 3
+      - 4
+
+    # Index starting from 1 and value for each fixed parameter
+    - &fixed_parameters #Note: changed these to fix everything but N
+      # 1: 1
+      # 2: 2.5
+      # 3: 2.0e-2
+      # 4: 0
+      # 5: 100
+
+  output-variables:
+    # Directory to save network training states
+    - &network_states_directory '../model_states/'
+
+# spectrum_fit.py config file
+spectrum-fit:
+  # Variables for training the network
+  training:
+    # Whether PyXspec tests should be used or not
+    tests: False
+    # Number of epochs to train for
+    decoder-save: 42
+    encoder-save: 7
+    decoder-load: 42
+    encoder-load: 7
+    epochs: 2
+    # Number of inputs to process between network weight updates
+    batch-size: 60
+    # Number of threads to use for multiprocessing, 0 will use all available,
+    # only used if tests is True
+    cpus: 1
+    # Learning rate for training
+    learning-rate: 1.0e-4     #when changing back to non-variational autoencoder (original), change to 1e-4
+    # Validation dataset fraction
+    validation-fraction: 0.20  
+    # File name for decoder model to load
+    decoder-name: *decoder_name
+    # File name for encoder model to load
+    encoder-name: *encoder_name
+    # Network description
+    network-description: ''
+    # Path to the configuration files for the encoder and decoder
+    network-configs-directory: *network_configs_directory
+    # Path to the Python interpreter
+    python-path: *python-path
+  # File location for different datasets
+  data:
+    # Path to the dictionary containing the spectra (spectra) for decoder training,
+    # can also contain parameters (params) for supervised learning and/or PyXspec validation,
+    # and file names (names) if specific files in the directory should be used
+    # if parameters are provided and PyXspec validation is used
+    decoder-data-path: *clean_synthetic_data_path
+    # Path to the spectra for encoder training, same format as for decoder
+    encoder-data-path: *spectra_data_path
+    # Path to the directory of spectra fits files, only required if parameters exists,
+    # and you want to use PyXspec validation
+    spectra-directory: *spectra_data_directory
+  # Model for the network to learn
+  model:
+    # Number of iterations for traditional PyXspec fitting
+    iterations: 130
+    # Number of iterations before calculating fit statistic for tracking progress,
+    # set this to iterations if you don't want to track the evolution
+    step: 80
+    # Number of free parameters
+    parameters-number: *parameter_number
+    # Xspec model to use
+    model-name: *model_name
+    # Name of custom model that has to be loaded, can be empty
+    custom-model-name: *custom_model_name
+    # Directory to custom model, can be empty
+    model-directory: *model_directory
+    # Which model free parameter indices to take the log of, starting from 0
+    log-parameters: *log_parameters
+    # Index starting from 1 and value for each fixed parameter
+    fixed-parameters: *fixed_parameters
+    # Default free parameter values, can be empty if default performance measurement isn't required
+    default-parameters:
+      - 1
+      - 2.5
+      - 2.0e-2
+      - 1
+      - 1
+      # - 
+      # -
+      # -
+      # -
+      # -
+
+      #      - 1
+      #      - 1
+    # Model free parameter names for displaying on plots
+    parameter-names:
+      - '$N_{H}$ $(10^{22}\ cm^{-2})$'
+      - '$\Gamma$'
+      - '$f_{sc}$'
+      - '$kT_{\rm disk}$ (keV)'
+      - '$N$'
+      # - '$N_{H}$ $(10^{22}\ cm^{-2}) err$'
+      # - '$\Gamma err$'
+      # - '$f_{sc} err$'
+      # - '$kT_{\rm disk}$ (keV) err'
+      # - '$N$ err'
+      #      - '$A_{\rm FeXXV}$'
+      #      - '$A_{\rm FeXXVI}$'
+      #      - '$N_{H}$ $(10^{22}\ cm^{-2})$'
+      #      - '$r\log{xi}$'
+      #      - '$\dot{M}$'
+      #      - 'Inclination'
+      #      - '$M_{\rm BH}$'
+      #      - '$a_{\rm BH}$'
+      #      - 'norm'
+  # Directory locations for different outputs
+  output:
+    # Path to the parameters predictions generated by the encoder
+    parameter-predictions-path: '../parameter_predictions.csv'
+    # Directory to save network training states
+    network-states-directory: *network_states_directory
+    # Directory to save plots
+    plots-directory: '../plots/'
+    # Directory for passing data to/from multiprocessing workers
+    worker-directory: '../data/worker/'
+
+# data_preprocessing.py config file
+data-preprocessing:
+  # Variables for preprocessing
+  preprocessing:
+    # Number of threads to use for multiprocessing, 0 will use all available
+    cpus: 0
+  # File location for different datasets
+  data:
+    # Path to the directory of spectra fits files,
+    # should be the same as for spectrum_fit.py
+    spectra-directory: *spectra_data_directory
+    # Path to the directory of background fits files +
+    # background file location in spectrum fits file
+    background-directory: *spectra_data_directory
+    # Path to the spectra file containing spectra names,
+    # can be either a pickled dictionary with the key names, or a numpy file,
+    # leave empty if this doesn't exist, file names in spectra-directory will be used instead
+    names-path: *spectra_data_path
+  # File location for outputs
+  output:
+    # Path to the outputted spectra
+    processed-path: '../data/preprocessed_spectra.npy'
+
+# synthesize_spectra.py config file
+synthesize-spectra:
+  # Variables for synthesizing spectra
+  synthesize:
+    # If previous synthetic data should be removed
+    clear-spectra: True
+    # If the distribution should be biased towards a uniform distribution in the parameter space
+    flat-distribution-bias: True
+    # Number of synthetic data to try to generate, real number will be less due to bad data cleaning
+    synthetic-number: 20000
+    # Number of spectra to generate before saving,
+    # useful if you want to stop it early, but smaller values are slower
+    spectra-per-batch: 1000
+    # Number of fake spectra to generate per background, lower is better but slower
+    spectra-per-background: 100
+    # Number of threads to use for multiprocessing, 0 will use all available
+    cpus: 0
+    # Path to the Python interpreter
+    python-path: *python-path
+  # File locations for outputs
+  # All paths are relative to the parent folder due to string overflows in fits files
+  data:
+    # Path to the directory of spectra fits files
+    # Should be the same as for spectrum_fit.py
+    spectra-directory: *spectra_data_directory
+    # Path to the spectra file containing spectra names,
+    # can be either a pickled dictionary with the key names, or a numpy file,
+    # leave empty if this doesn't exist, file names in spectra-directory will be used instead,
+    # should be the same as for spectrum_fit.py
+    names-path: *spectra_data_path
+  # Model to base the synthetic spectra off
+  model:
+    # Number of free parameters, should be the same as for spectrum_fit.py
+    parameter-number: *parameter_number
+    # Xspec model to use
+    model-name: *model_name
+    # Name of custom model that has to be loaded, can be empty
+    # Should be the same as for spectrum_fit.py
+    custom-model-name: *custom_model_name
+    # Directory to custom model, can be empty
+    # Should be the same as for spectrum_fit.py
+    model-directory: *model_directory
+    # Which model free parameter indices to be sampled from logarithmic space, starting from 0,
+    # should be the same as for spectrum_fit.py
+    log-parameters: *log_parameters
+    # Parameter lower limit and upper limit in order of free parameter index
+    parameter-limits:
+      - # First free parameter
+        low: 5.0e-3 # Lower limit
+        high: 75 # Upper limit
+      -
+        low: 1.3
+        high: 4
+      -
+        low: 1.0e-3
+        high: 1
+      -
+        low: 2.5e-2
+        high: 4
+      -
+        low: 1.0e-2
+        high: 1.0e+10
+      -
+      -
+      -
+      -
+      -
+#      -
+#        low: 1.0e-4
+#        high: 1
+#      -
+#        low: 1.0e-4
+#        high: 1
+    # Index starting from 1 and value for each fixed parameter
+    # Should be the same as for spectrum_fit.py but as a dictionary
+    fixed-parameters: *fixed_parameters
+  # Directory locations for different outputs
+  output:
+    # Path to save the corrected and normalized spectra file
+    synthetic-path: *clean_synthetic_data_path
+    # Path to directory to save worker progress
+    worker-directory: './data/worker/'
+
+# network_optimizer.py config file
+network-optimizer:
+  # Optimization parameters
+  optimization:
+    # If continuing from previous optimization process
+    load: False
+    # If optimization progress should be saved
+    save: True
+    # Number of epochs to train for
+    epochs: 50
+    # Number of trials to try
+    trials: 30
+    # Minimum number of trials before pruning can happen
+    pruning-minimum-trials: 5
+    # File name for the network to optimize
+    name: *decoder_name
+    # Path to the configuration files for the encoder and decoder
+    # Should be the same as for spectrum_fit.py
+    network-configs-directory: *network_configs_directory
+    # Which model parameter indices to take the log of
+    # Should be the same as for spectrum_fit.py
+    log-parameters: *log_parameters
+  # File location for different datasets
+  data:
+    # Path to the spectra for training
+    spectra-path: *synthetic_data_path
+  # Directory locations for outputs
+  output:
+    # Directory to save network optimization states
+    network-states-directory: *network_states_directory
+
