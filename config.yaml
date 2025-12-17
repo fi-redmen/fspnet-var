@@ -10,7 +10,7 @@ global-variable :
     # Path to the configuration files for the encoder and decoder
     - &network_configs_directory '../network_configs'
     # Path to the Python interpreter
-    - &python-path '/opt/anaconda3/envs/FSPNet/bin/python'
+    - &python-path ''
   data-variables:
     # Path to real spectra as a pickled dictionary containing the spectra (spectra),
     # can also contain parameters (params) for supervised learning and
