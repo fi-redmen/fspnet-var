@@ -11,12 +11,16 @@ FSPNet-Var is a variational autoencoder network, building on the [FSPNet](https:
 ## Data compatibility
 
 ## File Descriptions
-**Main_NF**: Trains variational autoencoder with normalizing flow network network, makes predictions, and calls functions from VAE_plots for plotting
+**fspnetvar**
+* **main_NF**: Trains variational autoencoder with normalizing flow network, makes predictions, and plots results
+* **main_VAE**: Trains vanilla variational autoencoder network, makes predictions, and plots results
+* **MCMC_chains**: Runs MCMC chains for certain spectra using pyxspec
 
-**Main_VAE**: Trains vanilla variational autoencoder network, makes predictions, and calls functions from VAE_plots for plotting
+* **Utils**
+  * **misc_utils**: Miscellaneous functions
+  * **plot_utils**: Functions used in plots_var
+  * **plots_var**: Plotting functions
+  * **xspec_utils**: Functions which use PyXspec
 
-**VAE_plots**: Contains functions used for plotting
-
-**MCMC_chains**: Runs MCMC chains for certain spectra using pyxspec
-
-**network_configs**: Neural network configurations
+**network_configs** 
+Neural network configurations
