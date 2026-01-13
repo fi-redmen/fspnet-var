@@ -1,6 +1,7 @@
 # Fast Spectra Predictor Network-Variational (FSPNet-Var)
 FSPNet-Var is a variational autoencoder network, building on the [FSPNet](https://github.com/EthanTreg/Spectrum-Machine-Learning) model. A normalising flow is included in between the encoder and latent space to enable complex posterior distributions on inferred physical parameters in the latest model. This significantly outperforms the vanilla variational autoencoder. 
 
+The research paper can be found on [Arxiv](https://arxiv.org/abs/2601.07440)
 
 ## Requirements
 - Install dependencies:
