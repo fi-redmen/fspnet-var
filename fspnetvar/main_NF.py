@@ -1,9 +1,8 @@
 # from NFautoencoder import NFautoencoder, net_init, GaussianNLLLoss, MSELoss
 # import pandas as pd
 # from netloader_tests import TestConfig, gen_indexes, mod_network
-from networkx import config
+# from networkx import config
 import xspec
-from fspnet.spectrum_fit import init 
 
 import numpy as np
 import os
@@ -31,7 +30,7 @@ from netloader.utils.utils import progress_bar, save_name, get_device
 from fspnet.utils import plots
 from fspnet.utils.utils import open_config
 from fspnet.utils.data import SpectrumDataset, loader_init
-from fspnet.spectrum_fit import pyxspec_tests, AutoencoderNet, Tensor
+from fspnet.spectrum_fit import pyxspec_tests, AutoencoderNet
 
 import utils.plots_var as plots_var
 from utils.misc_utils import sample, get_energy_widths
@@ -67,219 +66,7 @@ class MSELoss(loss_funcs.MSELoss):
     """
     def forward(self, output: Tensor, target: Tensor) -> Tensor:
         return self._loss_func(output[:, 0], target[:, 0])
-
-def init(config: dict | str = '../config.yaml') -> tuple[
-        tuple[DataLoader, DataLoader],
-        tuple[DataLoader, DataLoader],
-        nets.BaseNetwork,
-        nets.BaseNetwork]:
-    """
-    Initialises the network and dataloaders
-
-    Parameters
-    ----------
-    config : dictionary | string, default = './config.yaml'
-        Configuration dictionary or path to the configuration dictionary
-
-    Returns
-    -------
-    tuple[tuple[Dataloader, Dataloader], tuple[Dataloader, Dataloader], BaseNetwork, BaseNetwork]
-        Train & validation dataloaders for decoder and autoencoder, decoder, and autoencoder
-    """
-    if isinstance(config, str):
-        _, config = open_config('spectrum-fit', config)
-
-    # Load config parameters
-    batch_size = config['training']['batch-size']
-    val_frac = config['training']['validation-fraction']
-    e_data_path = config['data']['encoder-data-path']
-    d_data_path = config['data']['decoder-data-path']
-    log_params = config['model']['log-parameters']
-
-    # Fetch dataset & network
-    e_dataset = SpectrumDataset(e_data_path, log_params)
-    d_dataset = SpectrumDataset(d_data_path, log_params)
-    decoder, net = net_init((e_dataset, d_dataset), config)
-
-    # Initialise datasets
-    e_loaders = loader_init(e_dataset, batch_size=batch_size, val_frac=val_frac, idxs=net.idxs)
-    d_loaders = loader_init(d_dataset, batch_size=batch_size, val_frac=val_frac, idxs=decoder.idxs)
-    net.idxs = e_dataset.idxs
-    decoder.idxs = d_dataset.idxs
     
-    return e_dataset, d_dataset, e_loaders, d_loaders, decoder, net
-
-def net_init(
-        datasets: tuple[SpectrumDataset, SpectrumDataset],
-        config: str | dict[str, Any] = './config.yaml',
-) -> tuple[nets.BaseNetwork, nets.BaseNetwork]:
-    """
-    Initialises the network
-
-    Parameters
-    ----------
-    datasets : tuple[SpectrumDataset, SpectrumDataset]
-        Encoder and decoder datasets
-    config : string | dictionary, default = './config.yaml'
-        Configuration dictionary or path to the configuration dictionary
-
-    Returns
-    -------
-    tuple[BaseNetwork, BaseNetwork]
-        Constructed decoder and autoencoder
-    """
-    if isinstance(config, str):
-        _, config = open_config('spectrum-fit', config)
-
-    # Load config parameters
-    e_save_num = config['training']['encoder-save']
-    e_load_num = config['training']['encoder-load']
-    d_save_num = config['training']['decoder-save']
-    d_load_num = config['training']['decoder-load']
-    learning_rate = config['training']['learning-rate']
-    encoder_name = config['training']['encoder-name']
-    decoder_name = config['training']['decoder-name']
-    description = config['training']['network-description']
-    networks_dir = config['training']['network-configs-directory']
-    log_params = config['model']['log-parameters']
-    states_dir = config['output']['network-states-directory']
-    device = 'cpu' # get_device()[1]
-
-    print('device:', device)
-
-    if d_load_num:
-        decoder = nets.load_net(d_load_num, states_dir, decoder_name, weights_only=False)
-        decoder.description = description
-        decoder.save_path = save_name(d_save_num, states_dir, decoder_name)
-        transform = decoder.transforms['targets']
-        param_transform = decoder.transforms['inputs']
-    else:
-
-        transform = transforms.MultiTransform([
-            transforms.NumpyTensor(),
-            transforms.MinClamp(dim=-1),
-            transforms.Log(),
-        ])
-        transform.transforms.append(transforms.Normalise(
-            data=transform(datasets[1].spectra),
-            mean=False
-        ))
-
-        param_transform = transforms.MultiTransform([
-            transforms.NumpyTensor(),
-            transforms.MinClamp(dim=0, idxs=log_params),
-            transforms.Log(idxs=log_params),
-        ])
-        param_transform.transforms.append(transforms.Normalise(
-            data=param_transform(datasets[1].params),
-            dim=0,
-        ))
-
-        decoder = Network(
-            decoder_name,
-            networks_dir,
-            list(datasets[1][0][1].shape),
-            list(datasets[1][0][2].shape),
-        )
-        decoder = nets.Decoder(
-            d_save_num,
-            states_dir,
-            decoder,
-            overwrite=True,
-            learning_rate=learning_rate,
-            description=description,
-            verbose='progress',
-            transform=transform,
-        )
-
-        decoder.transforms['inputs'] = param_transform
-        decoder.loss_func =  GaussianNLLLoss() # gaussian_loss #  #  #changes loss to gaussian loss - can look into other typs of loss
-
-    if e_load_num:
-        net = nets.load_net(e_load_num, states_dir, encoder_name, weights_only=False)
-        net.description = description
-        net.save_path = save_name(e_save_num, states_dir, encoder_name)
-    else:
-        net = Network(
-            encoder_name,
-            networks_dir,
-            list(datasets[0][0][2].shape),
-            list(datasets[0][0][1].shape),
-        )
-
-        # for transformer
-        # net = Network(
-        #     encoder_name,
-        #     networks_dir,
-        #     list((datasets[0][0][2][0].shape,
-        #     datasets[0][0][1].shape)),
-        #     list(datasets[0][0][1].shape)
-        # )
-
-        # chooses to train NF_autoencoder
-        net = NFautoencoder(
-            e_save_num,
-            states_dir,
-            NFautoencoderNetwork(net, decoder.net, name=encoder_name),
-            learning_rate=learning_rate,
-            description=description,
-            verbose='full',
-            transform=transform,
-            latent_transform=param_transform,
-        )
-
-        # chooses to just train encoder
-        # net = nets.NormFlowEncoder(
-        #     e_save_num,
-        #     states_dir,
-        #     net,
-        #     learning_rate=[learning_rate]*2,
-        #     description=description,
-        #     transform=param_transform,
-        #     verbose='full'
-        # )
-
-        #Loss function settings for autoencoder
-        net.reconstruct_func =   GaussianNLLLoss() #  gaussian_loss   #
-        net.latent_func =  MSELoss()   # mse_loss    #  
-        net.latent_loss = 0 #3.0e-1
-        net.flowlossweight = 1 #1e-1 #3.0e-1
-        net.reconstruct_loss = 1 #1e-3 #4.0e-1
-        net.kl_loss = 0 #
-        net.bound_loss = 0 # 3e-1
-
-        # net.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau( #included scheduler to implement minimum learning rate
-        #     net.optimiser,
-        #     factor=0.5,
-        #     min_lr=1e-5,
-        # )
-
-        net.optimiser = optim.AdamW(net.net.parameters(), lr=learning_rate*0.1)
-        net.scheduler = optim.lr_scheduler.ReduceLROnPlateau(net.optimiser, factor=0.5, min_lr=1e-6)
-
-    # removed for fake data
-    for dataset in datasets:
-        # for with uncertainties
-        dataset.spectra, dataset.uncertainty = transform(
-            dataset.spectra,
-            uncertainty=dataset.uncertainty,
-        )
-        dataset.params, dataset.param_uncertainty = param_transform(
-            dataset.params,
-            uncertainty=dataset. param_uncertainty,
-        )
-
-    return decoder.to(device), net.to(device)
-    '''
-    for dataset in datasets:
-        dataset.spectra, dataset.uncertainties = transform(
-            dataset.spectra,
-            uncertainties=dataset.uncertainties,
-        )
-        dataset.params = param_transform(dataset.params)
-    return decoder.to(device), net.to(device)
-    '''
-
 class NFautoencoderNetwork(AutoencoderNet):
     def forward(self, x: torch.Tensor) -> torch.Tensor: # add ,target_uncertainty to arguments
         """
@@ -483,7 +270,7 @@ class NFautoencoder(nets.Autoencoder):
                          f'Time: {time() - t_initial:.1f}',
                 )
 
-            losses.append(float(np.mean(self.losses[1][-10:]))) # averages over 10 last values
+            losses.append(float(np.mean(self.losses[1][-10:]))) # averages loss over 10 last values
 
             # End plateaued networks early
             if (self._epoch > self._start_epoch + self.scheduler.patience * 2 and
@@ -498,10 +285,207 @@ class NFautoencoder(nets.Autoencoder):
         final_loss = self._train_val(loaders[1])
         print(f'\nFinal validation loss: {final_loss:.3e}')
 
+def net_init(
+        datasets: tuple[SpectrumDataset, SpectrumDataset],
+        config: str | dict[str, Any] = './config.yaml',
+) -> tuple[nets.BaseNetwork, nets.BaseNetwork]:
+    """
+    Initialises the network
+
+    Parameters
+    ----------
+    datasets : tuple[SpectrumDataset, SpectrumDataset]
+        Encoder and decoder datasets
+    config : string | dictionary, default = './config.yaml'
+        Configuration dictionary or path to the configuration dictionary
+
+    Returns
+    -------
+    tuple[BaseNetwork, BaseNetwork]
+        Constructed decoder and autoencoder
+    """
+    if isinstance(config, str):
+        _, config = open_config('spectrum-fit', config)
+
+    # Load config parameters
+    e_save_num = config['training']['encoder-save']
+    e_load_num = config['training']['encoder-load']
+    d_save_num = config['training']['decoder-save']
+    d_load_num = config['training']['decoder-load']
+    learning_rate = config['training']['learning-rate']
+    encoder_name = config['training']['encoder-name']
+    decoder_name = config['training']['decoder-name']
+    description = config['training']['network-description']
+    networks_dir = config['training']['network-configs-directory']
+    log_params = config['model']['log-parameters']
+    states_dir = config['output']['network-states-directory']
+    device = 'cpu' # get_device()[1]
+
+    print('device:', device)
+
+    if d_load_num:
+        decoder = nets.load_net(d_load_num, states_dir, decoder_name, weights_only=False)
+        decoder.description = description
+        decoder.save_path = save_name(d_save_num, states_dir, decoder_name)
+        transform = decoder.transforms['targets']
+        param_transform = decoder.transforms['inputs']
+    else:
+
+        transform = transforms.MultiTransform([
+            transforms.NumpyTensor(),
+            transforms.MinClamp(dim=-1),
+            transforms.Log(),
+        ])
+        transform.transforms.append(transforms.Normalise(
+            data=transform(datasets[1].spectra),
+            mean=False
+        ))
+
+        param_transform = transforms.MultiTransform([
+            transforms.NumpyTensor(),
+            transforms.MinClamp(dim=0, idxs=log_params),
+            transforms.Log(idxs=log_params),
+        ])
+        param_transform.transforms.append(transforms.Normalise(
+            data=param_transform(datasets[1].params),
+            dim=0,
+        ))
+
+        decoder = Network(
+            decoder_name,
+            networks_dir,
+            list(datasets[1][0][1].shape),
+            list(datasets[1][0][2].shape),
+        )
+        decoder = nets.Decoder(
+            d_save_num,
+            states_dir,
+            decoder,
+            overwrite=True,
+            learning_rate=learning_rate,
+            description=description,
+            verbose='progress',
+            transform=transform,
+        )
+
+        decoder.transforms['inputs'] = param_transform
+        decoder.loss_func =  GaussianNLLLoss() # gaussian_loss #  #  #changes loss to gaussian loss - can look into other typs of loss
+
+    if e_load_num:
+        net = nets.load_net(e_load_num, states_dir, encoder_name, weights_only=False)
+        net.description = description
+        net.save_path = save_name(e_save_num, states_dir, encoder_name)
+    else:
+        net = Network(
+            encoder_name,
+            networks_dir,
+            list(datasets[0][0][2].shape),
+            list(datasets[0][0][1].shape),
+        )
+
+        # for transformer
+        # net = Network(
+        #     encoder_name,
+        #     networks_dir,
+        #     list((datasets[0][0][2][0].shape,
+        #     datasets[0][0][1].shape)),
+        #     list(datasets[0][0][1].shape)
+        # )
+
+        # to train NF_autoencoder
+        net = NFautoencoder(
+            save_num=e_save_num,
+            states_dir=states_dir,
+            net=NFautoencoderNetwork(net, decoder.net, name=encoder_name),
+            learning_rate=learning_rate,
+            description=description,
+            # verbose='full',
+            transform=transform,
+            latent_transform=param_transform,
+        )
+
+        # to just train encoder
+        # net = nets.NormFlowEncoder(
+        #     e_save_num,
+        #     states_dir,
+        #     net,
+        #     learning_rate=[learning_rate]*2,
+        #     description=description,
+        #     transform=param_transform,
+        #     verbose='full'
+        # )
+
+        #Loss function settings for autoencoder
+        net.reconstruct_func = GaussianNLLLoss() #  gaussian_loss   #
+        net.latent_func = MSELoss()   # mse_loss    #  
+        net.latent_loss = 0 #3.0e-1
+        net.flowlossweight = 1 #1e-1 #3.0e-1
+        net.reconstruct_loss = 1 #1e-3 #4.0e-1
+        net.kl_loss = 0 #
+        net.bound_loss = 0 # 3e-1
+
+        net.optimiser = optim.AdamW(net.net.parameters(), lr=learning_rate*0.1)
+        net.scheduler = optim.lr_scheduler.ReduceLROnPlateau(net.optimiser, factor=0.5, min_lr=1e-6)
+
+    for dataset in datasets:
+        # for with uncertainties
+        dataset.spectra, dataset.uncertainty = transform(
+            dataset.spectra,
+            uncertainty=dataset.uncertainty,
+        )
+        dataset.params, dataset.param_uncertainty = param_transform(
+            dataset.params,
+            uncertainty=dataset. param_uncertainty,
+        )
+
+    return decoder.to(device), net.to(device)
+
+
+def init(config: dict | str = './config.yaml') -> tuple[
+        tuple[DataLoader, DataLoader],
+        tuple[DataLoader, DataLoader],
+        nets.BaseNetwork,
+        nets.BaseNetwork]:
+    """
+    Initialises the network and dataloaders
+
+    Parameters
+    ----------
+    config : dictionary | string, default = './config.yaml'
+        Configuration dictionary or path to the configuration dictionary
+
+    Returns
+    -------
+    tuple[tuple[Dataloader, Dataloader], tuple[Dataloader, Dataloader], BaseNetwork, BaseNetwork]
+        Train & validation dataloaders for decoder and autoencoder, decoder, and autoencoder
+    """
+    if isinstance(config, str):
+        _, config = open_config('spectrum-fit', config)
+
+    # Load config parameters
+    batch_size = config['training']['batch-size']
+    val_frac = config['training']['validation-fraction']
+    e_data_path = config['data']['encoder-data-path']
+    d_data_path = config['data']['decoder-data-path']
+    log_params = config['model']['log-parameters']
+
+    # Fetch dataset & network
+    e_dataset = SpectrumDataset(e_data_path, log_params)
+    d_dataset = SpectrumDataset(d_data_path, log_params)
+    decoder, net = net_init((e_dataset, d_dataset), config)
+
+    # Initialise datasets
+    e_loaders = loader_init(e_dataset, batch_size=batch_size, val_frac=val_frac, idxs=net.idxs)
+    d_loaders = loader_init(d_dataset, batch_size=batch_size, val_frac=val_frac, idxs=decoder.idxs)
+    net.idxs = e_dataset.idxs
+    decoder.idxs = d_dataset.idxs
+    
+    return e_dataset, d_dataset, e_loaders, d_loaders, decoder, net
+
 def NF_train(decoder, net, 
              e_loaders, d_loaders, 
              learning_rate,
-             config: str = '../config.yaml'):
+             config: str = './config.yaml'):
     """
     Trains the normalising flow network.
 
@@ -528,7 +512,7 @@ def NF_train(decoder, net,
     if isinstance(config, str):
         _, config = open_config('spectrum-fit',config)
 
-    n_epochs = ['training']['epochs']
+    n_epochs = config['training']['epochs']
     learning_rate = config['training']['learning-rate']
 
     # train decoder
@@ -545,7 +529,7 @@ def NF_train(decoder, net,
     net.net.net[1] = decoder.net
     net.net.net[1].requires_grad_(False)
 
-    #setting up autoencoder optimiser correctly - might not need
+    #setting up autoencoder optimiser
     if net._epoch==0:
         net.optimiser = optim.AdamW(net.net.parameters(), lr=learning_rate)
         net.scheduler = optim.lr_scheduler.ReduceLROnPlateau(net.optimiser, min_lr=1e-6,)
@@ -729,42 +713,42 @@ def load_xspec_preds(specific_data):
 
     return xspec_data
 
-def main(num_d_epochs=250, num_e_epochs=250, real_epochs=250, learning_rate=0.001, 
+def main(learning_rate=0.001, 
          train=False, predict=False, predict_for_synthetic=False, specific=True,
          num_cycles=1):
 
     if train:
-        if num_cycles>0:
-            _, config = open_config('spectrum-fit', '../config.yaml')
-            config['training']['encoder-load'] = 0
-            config['training']['decoder-load'] = 0
+        if num_cycles>1:
+            _, new_config = open_config('spectrum-fit', './config.yaml')
+            new_config['training']['encoder-load'] = 0
+            new_config['training']['decoder-load'] = 0
             
             for cycle_num in range(num_cycles):
                 # Set load and save names
-                config['training']['encoder-save'] = str(config['training']['encoder-save']) + '_test_' + str(cycle_num + 1)   
-                config['training']['decoder-save'] = str(config['training']['decoder-save']) + '_test_' + str(cycle_num + 1)
-                config['training']['description'] = 'test cycle '+str(cycle_num+1)+'\n Transfer learning with decoder trained on synthetic data'
+                new_config['training']['encoder-save'] = 12 + cycle_num #str(new_config['training']['encoder-save']) + '_test_' + str(cycle_num + 1)   
+                new_config['training']['decoder-save'] = 12 + cycle_num #str(new_config['training']['decoder-save']) + '_test_' + str(cycle_num + 1)
+                new_config['training']['description'] = 'test cycle '+str(cycle_num+1)+'\n Decoder trained on synthetic data, Network trained on synthetic, then real'
 
                 #initialise data loaders and networks
-                e_dataset, d_dataset, e_loaders, d_loaders, decoder, net = init(config)
+                e_dataset, d_dataset, e_loaders, d_loaders, decoder, net = init(new_config)
 
                 print(f'Cycle {cycle_num + 1}/{num_cycles} initialized.')
                 NF_train(decoder, net, 
                         e_loaders, d_loaders,
                         learning_rate,
-                        config)
+                        new_config)
                 print(f'Cycle {cycle_num + 1}/{num_cycles} completed.')
         else: 
             e_dataset, d_dataset, e_loaders, d_loaders, decoder, net = init()
 
             NF_train(decoder, net, 
-                        e_loaders, d_loaders, 
-                        num_d_epochs, num_e_epochs, real_epochs, 
-                        learning_rate)
+                    e_loaders, d_loaders,
+                    learning_rate)
+            
     else: 
         e_dataset, d_dataset, e_loaders, d_loaders, decoder, net = init()
 
-    # saves name of predictions as encoder name_decoder name
+    # saves name of predictions as encoder_name ecoder_name
     synth_plot_str = 'synthetic'  if predict_for_synthetic else 'real'
     pred_savename = os.path.basename(net.save_path)[:-4]+' '+os.path.basename(decoder.save_path)[:-4] #'Encoder NF0_2' #
     plots_directory = os.path.join(ROOT,'plots',pred_savename,synth_plot_str+'_preds/')
@@ -817,11 +801,11 @@ def main(num_d_epochs=250, num_e_epochs=250, real_epochs=250, learning_rate=0.00
 
     # # plotting comparison between parameters
     # # to color data by certain parameters
-    # kT = list(val_data['targets'][:,0,3])
+    # kT = val_data['targets'][:,0,3]
+    # Norm = val_data['targets'][:,0,4]
     # nH = list(val_data['targets'][:,0,0])
     # gamma = list(val_data['targets'][:,0,1])
     # fsc = list(val_data['targets'][:,0,2])
-    # nH_errors = list(val_data['targets'][:,1,0])
     # det_nums=[]
     # for spectrum in val_data['ids']:
     #     with fits.open(os.path.join(ROOT,'data','spectra',spectrum)) as file:
@@ -835,8 +819,8 @@ def main(num_d_epochs=250, num_e_epochs=250, real_epochs=250, learning_rate=0.00
     #     val_data,
     #     specific_data=specific_data,
     #     log_colour_map=True,
-    #     colour_map=kT,
-    #     colour_map_label='kT (keV)',
+    #     colour_map=total_counts,
+    #     colour_map_label='Total Count Rate',
     #     dir_name=os.path.join(plots_directory, 'comparisons/'),
     #     n_points=50,
     #     num_dist_specs=250)
@@ -852,7 +836,7 @@ def main(num_d_epochs=250, num_e_epochs=250, real_epochs=250, learning_rate=0.00
     #                         num_specs=len(specific_data['ids']),
     #                         num_samples=1)
 
-    # # single reconstructions using samples from all_param_samples
+    # # # # single reconstructions using samples from all_param_samples
     # plots_var.recon_plot(
     #     decoder.net,
     #     net,
@@ -862,37 +846,61 @@ def main(num_d_epochs=250, num_e_epochs=250, real_epochs=250, learning_rate=0.00
     #     all_param_samples = all_param_samples,
     #     data_dir = os.path.join(ROOT,'data','spectra.pickle') if predict_for_synthetic else os.path.join(ROOT,'data','spectra/'))
 
-    # # posterior predictive plots using 100 samples per reconstruction
-    # plots_var.post_pred_samples = post_pred_plot(
+    # # # # # # posterior predictive plots using 100 samples per reconstruction
+    # post_pred_samples = plots_var.post_pred_plot(
     #     decoder.net,
     #     net,
     #     dir_name = plots_directory+'reconstructions/',
     #     data = val_data,
-    #     specific_data = specific_data)
+    #     specific_data = specific_data,
+    #     data_dir = os.path.join(ROOT,'data','spectra.pickle') if predict_for_synthetic else os.path.join(ROOT,'data','spectra/'))
 
-    # # posterior predictive plots only using xspec to make reconstructions - not decoder
+    # # # # # # posterior predictive plots only using xspec to make reconstructions - not decoder
     # plots_var.post_pred_plot_xspec(
     #     dir_name = plots_directory+'reconstructions/',
     #     data = val_data,
     #     specific_data = specific_data,
-    #     post_pred_samples=post_pred_samples)
+    #     post_pred_samples=post_pred_samples,
+    #     data_dir = os.path.join(ROOT,'data','spectra.pickle') if predict_for_synthetic else os.path.join(ROOT,'data','spectra/'))
 
-    # # latent space corner plot
+    # # # # # latent space corner plot
     # plots_var.latent_corner_plot(
     #     dir_name = plots_directory+'distributions/',
     #     data=val_data,
     #     xspec_data=xspec_data,
-    #     specific_data=specific_data)
+    #     specific_data=specific_data,
+    #     in_param_samples=all_param_samples)
 
     # scatter plot across all target parameters in dataset
     # plots_var.param_pairs_plot(
     #     data=val_data,
     #     dir_name=plots_directory)
 
-    # # 2D reconstruction plots - still working on this
+    # # 2D reconstruction plots
     # plots_var.rec_2d_plot(
-    #     dir_name = plots_directory+'reconstructions/',
+    #     plot_dir = plots_directory+'reconstructions/',
     #     data=val_data)
+
+    # # # Gamma Vs scattered fraction coloured by state
+    # plots_var.labels_plot(data=val_data,
+    #                       plot_dir=plots_directory,
+    #                       save_name='labels_plot.png')
+    
+    # # residuals vs total count rate
+    # plots_var.resid_params_plot(
+    #     data=val_data.copy(),
+    #     x_param=total_counts,
+    #     x_param_name='Total Count Rate',
+    #     plot_dir=plots_directory+'comparisons/',
+    #     save_name='Param_resids_tcr.png')
+
+    # residuals vs normalisation/disk temperature
+    # plots_var.resid_params_plot(
+    #     data=val_data.copy(),
+    #     x_param=Norm/fsc,
+    #     x_param_name='N/fsc',
+    #     plot_dir=plots_directory+'comparisons/',
+    #     save_name = 'Param_Resids_NkT.png')
 
     '''---------- pyxspec tests ----------'''
     # import xspec
