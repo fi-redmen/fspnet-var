@@ -2,388 +2,37 @@
 # import pandas as pd
 # from netloader_tests import TestConfig, gen_indexes, mod_network
 # from networkx import config
-import xspec
 
-import numpy as np
+import xspec
 import os
 import pickle
 import random
-import torch
 import sciplots
 import re
 import matplotlib.pyplot as plt
-
-from numpy import ndarray
-from torch import Tensor, nn, optim
+import numpy as np
+from torch import optim
 from torch.utils.data import DataLoader, Subset
-from time import time
 from typing import Any
-
 from astropy.io import fits
 
 import netloader.transforms as transforms
 import netloader.networks as nets
-import netloader.loss_funcs as loss_funcs
 from netloader.network import Network
-from netloader.utils.utils import progress_bar, save_name, get_device
+from netloader.utils.utils import save_name, get_device
 
 from fspnet.utils import plots
 from fspnet.utils.utils import open_config
 from fspnet.utils.data import SpectrumDataset, loader_init
-from fspnet.spectrum_fit import pyxspec_tests, AutoencoderNet
+from fspnet.spectrum_fit import pyxspec_tests
 
 import utils.plots_var as plots_var
 from utils.misc_utils import sample, get_energy_widths
 
+from NF_autoencoder import NFautoencoder, NFautoencoderNetwork, NFdecoder, GaussianNLLLoss, MSELoss
+
 plt.style.use(["science", "grid", 'no-latex'])
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
-class GaussianNLLLoss(loss_funcs.BaseLoss):
-    """
-    Gaussian negative log likelihood loss function
-    """
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        """
-        Parameters
-        ----------
-        *args
-            Optional arguments to be passed to GaussianNLLLoss
-        **kwargs
-            Optional keyword arguments to be passed to GaussianNLLLoss
-        """
-        super().__init__(nn.GaussianNLLLoss, *args, **kwargs)
-
-    def __setstate__(self, state: dict[str, Any]) -> None:
-        super().__setstate__(state)
-        self._loss_func = nn.GaussianNLLLoss(*self._args, **self._kwargs)
-
-    def forward(self, output: Tensor, target: Tensor) -> Tensor:
-        return self._loss_func(output[:, 0], target[:, 0], target[:, 1] ** 2)
-
-class MSELoss(loss_funcs.MSELoss):
-    """
-    Mean Squared Error (MSE) loss function
-    """
-    def forward(self, output: Tensor, target: Tensor) -> Tensor:
-        return self._loss_func(output[:, 0], target[:, 0])
-
-class NFdecoder(nets.Decoder):
-    def __init__(
-    self,
-    save_num: int | str,
-    states_dir: str,
-    net: nn.Module | Network,
-    overwrite = False,
-    mix_precision = False,
-    learning_rate = 1e-3,
-    description = '',
-    verbose = 'full',
-    transform = None,
-    in_transform = None) -> None:
-        super().__init__(
-            save_num,
-            states_dir,
-            net,
-            overwrite=overwrite,
-            mix_precision=mix_precision,
-            learning_rate=learning_rate,
-            description=description,
-            verbose=verbose,
-            transform=transform,
-            in_transform=in_transform)
-        self._start_epoch = 0
-        self.loss_func = MSELoss()
-
-    def __getstate__(self) -> dict[str, Any]:
-        return super().__getstate__() | {
-            'loss_func': self.loss_func,
-            'start_epoch': self._start_epoch}
-
-    def __setstate__(self, state: dict[str, Any]) -> None:
-        super().__setstate__(state)
-        self.loss_func = state['loss_func']
-        self._start_epoch = state['start_epoch']
-
-    def training(self, epochs: int, loaders: tuple[DataLoader, DataLoader]) -> None:
-        """
-        Trains & validates the network for each epoch
-
-        Parameters
-        ----------
-        epochs : int
-            Number of epochs to train the network up to
-        loaders : tuple[DataLoader, DataLoader]
-            Train and validation data loaders
-        """
-        t_initial: float
-        final_loss: float
-
-        losses=[]
-
-        for i in range(len(self.losses[1])):
-            losses.append(float(np.mean(self.losses[1][i-10:i])))
-
-        # Train for each epoch
-        for i in range(self._epoch, epochs):
-            t_initial = time()
-
-            # Train network
-            self.train(True)
-            self.losses[0].append(self._train_val(loaders[0]))
-
-            # Validate network
-            self.train(False)
-            self.losses[1].append(self._train_val(loaders[1]))
-            self._update_scheduler(metrics=self.losses[1][-1])
-
-            # Save training progress
-            self._update_epoch()
-            self.save()
-
-            if self._verbose in ('full', 'epoch'):
-                print(f'Epoch [{self._epoch}/{epochs}]\t'
-                    f'Training loss: {self.losses[0][-1]:.3e}\t'
-                    f'Validation loss: {self.losses[1][-1]:.3e}\t'
-                    f'Time: {time() - t_initial:.1f}')
-            elif self._verbose == 'progress':
-                progress_bar(
-                    i,
-                    epochs,
-                    text=f'Epoch [{self._epoch}/{epochs}]\t'
-                        f'Training: {self.losses[0][-1]:.3e}\t'
-                        f'Validation: {self.losses[1][-1]:.3e}\t'
-                        f'Time: {time() - t_initial:.1f}',
-                )
-
-            losses.append(float(np.mean(self.losses[1][-10:]))) # averages loss over 10 last values
-
-            # End plateaued networks early
-            if (self._epoch > self._start_epoch + self.scheduler.patience * 2 and
-                self.losses[1][-self.scheduler.patience * 2] < self.losses[1][-1]):
-
-                print('Trial plateaued, ending early...')
-                break
-
-        self.train(False)
-        final_loss = self._train_val(loaders[1])
-        print(f'\nFinal validation loss: {final_loss:.3e}')
-
-        self._start_epoch = self._epoch
-
-class NFautoencoderNetwork(AutoencoderNet):
-    def forward(self, x: torch.Tensor) -> torch.Tensor: # add ,target_uncertainty to arguments
-        """
-        Forward pass of the autoencoder
-
-        Parameters
-        ----------
-        x : (N,...) list[Tensor] | Tensor
-            Input tensor(s) with batch size N
-
-        Returns
-        -------
-        (N,...) list[Tensor] | Tensor
-            Output tensor from the network
-        """
-        x = self.net[0](x)
-        self.checkpoints.append(x)
-        x = x.sample([1])
-        x = x[0]
-
-        # if hasattr(self.net[0], 'kl_loss'): - don't need kl loss?
-        #     self.kl_loss = self.net[0].kl_loss
-
-        return self.net[1](x)   # for non variational
-
-class NFautoencoder(nets.Autoencoder):
-    def __init__(self, 
-                 save_num, 
-                 states_dir, 
-                 net, 
-                 overwrite=True, 
-                 mix_precision = False, 
-                 learning_rate = 0.001, 
-                 description = '', 
-                 verbose = 'full', 
-                 transform = None, 
-                 latent_transform = None):
-        super().__init__(save_num=save_num,
-                         states_dir=states_dir,
-                         net=net,
-                         overwrite=overwrite,
-                         mix_precision=mix_precision,
-                         learning_rate=learning_rate,
-                         description=description,
-                         verbose=verbose,
-                         transform=transform,
-                         latent_transform=latent_transform)
-        self._start_epoch = 0
-        self.flowlossweight = 0.5
-        self.separate_losses = {
-            'reconstruct': [],
-            'flow': [],
-            'latent': [],
-            'bound': [],
-            'kl': []
-        }
-
-    def __getstate__(self) -> dict[str, Any]:
-        return super().__getstate__() | {
-            'flowlossweight': self.flowlossweight,
-            'separate_losses': self.separate_losses,
-            'start_epoch': self._start_epoch
-        }
-
-    def __setstate__(self, state: dict[str, Any]) -> None:
-        super().__setstate__(state)
-        self.flowlossweight = state['flowlossweight']
-        self.separate_losses = state['separate_losses']
-        self._start_epoch = state['start_epoch']
-
-    def _loss(self, in_data: Tensor, target: Tensor) -> float:
-        """
-        Calculates the loss from the autoencoder's predictions
-
-        Parameters
-        ----------
-        in_data : (N,...) Tensor
-            Input high dimensional data of batch size N and the remaining dimensions depend on the
-            network used
-        target : (N,...) Tensor
-            Latent target low dimensional data of batch size N and the remaining dimensions depend
-            on the network used
-
-        Returns
-        -------
-        float
-            Loss from the autoencoder's predictions'
-        """
-        loss: Tensor
-        latent: Tensor | None = None
-        bounds: Tensor = torch.tensor([0., 1.]).to(self._device)
-        output: Tensor = self.net(in_data) #,target (for inheriting class)
-
-        separate_loss = []
-
-        if self.net.checkpoints:
-            latent = self.net.checkpoints[-1].sample([1])[0]
-
-        # Define a dictionary for loss components
-        loss_components = { #torch.log1p() in recon? - might be unstable trianing for negative values
-            'reconstruct':  self.reconstruct_func(output, in_data ),
-            'flow': -1 * self.net.checkpoints[-1].log_prob(target).mean(),
-            'latent':  self.latent_func(latent, target), #if self.latent_loss and latent is not None else None,
-            'bound':  torch.mean(torch.cat((
-                (bounds[0] - latent) ** 2 * (latent < bounds[0]),
-                (latent - bounds[1]) ** 2 * (latent > bounds[1]),
-            ))) if self.bound_loss and latent is not None else None,
-            'kl': self.kl_loss * self.net.kl_loss if self.kl_loss else None,
-        }
-
-        # Iterate through the dictionary to process each loss component
-        separate_loss = []
-        for key, loss_value in loss_components.items():
-            if loss_value is not None:  # Only process non-None losses
-                separate_loss.append(loss_value)
-                if self._train_state:
-                    self.separate_losses[key].append(loss_value.clone().item())
-
-        for key, weight in enumerate([self.reconstruct_loss, self.flowlossweight, self.latent_loss]):
-            if separate_loss[key] is not None:
-                separate_loss[key] *= weight
-
-        # Compute the total loss
-        loss = torch.sum(torch.stack(separate_loss))
-
-        self._update(loss)
-        return loss.item()
-
-    def batch_predict(self, data: Tensor, num_samples, **_: Any) -> tuple[ndarray, ...]:
-        """
-        Generates predictions for the given data batch
-
-        Parameters
-        ----------
-        data : (N,...) Tensor
-            N data to generate predictions for
-
-        Returns
-        -------
-        tuple[(N,...) ndarray, ...]
-            N predictions for the given data
-        """
-
-        return (
-            self.net(data).detach().cpu().numpy(),
-            self.net.checkpoints[-1].sample([num_samples]).swapaxes(0,1).detach().cpu().numpy(),
-            data.detach().cpu().numpy(),
-        )
-
-    def training(self, epochs: int, loaders: tuple[DataLoader, DataLoader]) -> None:
-        """
-        Trains & validates the network for each epoch
-
-        Parameters
-        ----------
-        epochs : int
-            Number of epochs to train the network up to
-        loaders : tuple[DataLoader, DataLoader]
-            Train and validation data loaders
-        """
-        t_initial: float
-        final_loss: float
-
-        losses =[]
-
-        for i in range(len(self.losses[1])):
-            losses.append(float(np.mean(self.losses[1][i-10:i])))
-
-        # Train for each epoch
-        for i in range(self._epoch, epochs):
-            t_initial = time()
-
-            # Train network
-            self.train(True)
-            self.losses[0].append(self._train_val(loaders[0]))
-
-            # Validate network
-            self.train(False)
-            self.losses[1].append(self._train_val(loaders[1]))
-            self._update_scheduler(metrics=self.losses[1][-1])
-
-            # Save training progress
-            self._update_epoch()
-            self.save()
-
-            if self._verbose in ('full', 'epoch'):
-                print(f'Epoch [{self._epoch}/{epochs}]\t'
-                      f'Training loss: {self.losses[0][-1]:.3e}\t'
-                      f'Validation loss: {self.losses[1][-1]:.3e}\t'
-                      f'Time: {time() - t_initial:.1f}')
-            elif self._verbose == 'progress':
-                progress_bar(
-                    i,
-                    epochs,
-                    text=f'Epoch [{self._epoch}/{epochs}]\t'
-                         f'Training: {self.losses[0][-1]:.3e}\t'
-                         f'Validation: {self.losses[1][-1]:.3e}\t'
-                         f'Time: {time() - t_initial:.1f}',
-                )
-
-            losses.append(float(np.mean(self.losses[1][-10:]))) # averages loss over 10 last values
-
-            # End plateaued networks early
-            if (self._epoch > self._start_epoch + self.scheduler.patience * 2 and
-                self.losses[1][-self.scheduler.patience * 2] < self.losses[1][-1]):
-
-                print('Trial plateaued, ending early...')
-                break
-
-        self.train(False)
-        final_loss = self._train_val(loaders[1])
-        print(f'\nFinal validation loss: {final_loss:.3e}')
-
-        self._start_epoch = self._epoch
 
 def net_init(
         datasets: tuple[SpectrumDataset, SpectrumDataset],
@@ -483,15 +132,6 @@ def net_init(
             list(datasets[0][0][1].shape),
         )
 
-        # for transformer
-        # net = Network(
-        #     encoder_name,
-        #     networks_dir,
-        #     list((datasets[0][0][2][0].shape,
-        #     datasets[0][0][1].shape)),
-        #     list(datasets[0][0][1].shape)
-        # )
-
         # to train NF_autoencoder
         net = NFautoencoder(
             save_num=e_save_num,
@@ -504,25 +144,20 @@ def net_init(
             latent_transform=param_transform,
         )
 
-        # to just train encoder
-        # net = nets.NormFlowEncoder(
-        #     e_save_num,
-        #     states_dir,
-        #     net,
-        #     learning_rate=[learning_rate]*2,
-        #     description=description,
-        #     transform=param_transform,
-        #     verbose='full'
-        # )
-
         #Loss function settings for autoencoder
         net.reconstruct_func = GaussianNLLLoss() #  gaussian_loss   #
         net.latent_func = MSELoss()   # mse_loss    #  
-        net.latent_loss = 0 #3.0e-1
-        net.flowlossweight = 1 #1e-1 #3.0e-1
-        net.reconstruct_loss = 1 #1e-3 #4.0e-1
-        net.kl_loss = 0 #
-        net.bound_loss = 0 # 3e-1
+        # net.latent_loss = 0 #3.0e-1
+        # net.flowlossweight = 1 #1e-1 #3.0e-1
+        # net.reconstruct_loss = 1 #1e-3 #4.0e-1
+        # net.kl_loss = 0 #
+        # net.bound_loss = 0 # 3e-1
+
+        net.set_loss_weights(bound=0,
+                             kl=0,
+                             latent=0,
+                             flow=0,
+                             reconstruct=1)
 
     for dataset in datasets:
         # for with uncertainties
@@ -627,7 +262,7 @@ def NF_train(cycle_num: int | None = 0,
     decoder.scheduler = optim.lr_scheduler.ReduceLROnPlateau(net.optimiser, min_lr=1e-8,)
     # train decoder on synthetic
     print('training decoder...')
-    decoder.training(n_epochs, d_loaders) 
+    # decoder.training(n_epochs, d_loaders) 
     print('decoder trained!')
 
     #fix decoder's weights so they dont change while training the encoder
