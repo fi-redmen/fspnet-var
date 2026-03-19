@@ -11,6 +11,7 @@ import sciplots
 import re
 import matplotlib.pyplot as plt
 import numpy as np
+import torch
 from torch import optim
 from torch.utils.data import DataLoader, Subset
 from typing import Any
@@ -258,21 +259,26 @@ def NF_train(cycle_num: int | None = 0,
     
     '''---------- DECODER TRAINING ----------'''
     #setting up decoder optimiser
-    decoder.optimiser = optim.AdamW(net.net.parameters(), lr=learning_rate)
-    decoder.scheduler = optim.lr_scheduler.ReduceLROnPlateau(net.optimiser, min_lr=1e-8,)
+    decoder.optimiser = optim.AdamW(decoder.net.parameters(), lr=learning_rate)
+    decoder.scheduler = optim.lr_scheduler.ReduceLROnPlateau(decoder.optimiser, min_lr=1e-8,)
     # train decoder on synthetic
     print('training decoder...')
-    # decoder.training(n_epochs, d_loaders) 
+    decoder.training(n_epochs, d_loaders) 
     print('decoder trained!')
 
     #fix decoder's weights so they dont change while training the encoder
     net.net.net[1] = decoder.net
-    net.net.net[1].requires_grad_(False)
+    # net.net.net[1].requires_grad_(False)
 
     '''---------- ENCODER TRAINING SYNTHETIC ----------'''
     #setting up autoencoder optimiser
     if net._epoch==0:
-        net.optimiser = optim.AdamW(net.net.parameters(), lr=learning_rate)
+        net.optimiser = optim.AdamW([
+            {'params': net.net.net[0].parameters(), 'lr': learning_rate},
+            {'params': net.net.net[1].parameters(), 'lr': learning_rate},
+        ])
+        net.optimiser.param_groups[1]['lr'] = 0
+        # net.optimiser = optim.AdamW(net.net.parameters(), lr=learning_rate)
         net.scheduler = optim.lr_scheduler.ReduceLROnPlateau(net.optimiser, min_lr=1e-6,)
     # train autoencoder on synthetic
     print('training encoder on synthetic...')
@@ -293,10 +299,11 @@ def NF_train(cycle_num: int | None = 0,
     _, _, _, _, _, trans_net = init(config)
     # keep using old decoder and ensure gradient is still frozen
     trans_net.net.net[1] = decoder.net
-    trans_net.net.net[1].requires_grad_(False)
+    # trans_net.net.net[1].requires_grad_(False)
     # resetting autoencoder optimiser
     if trans_net.get_epochs() == n_epochs:
         trans_net.optimiser = optim.AdamW(trans_net.net.parameters(), lr=5e-6)
+        trans_net.optimiser.param_groups[1]['lr'] = 0 #freeze decoder weights
         trans_net.scheduler = optim.lr_scheduler.ReduceLROnPlateau(trans_net.optimiser, factor=0.5, min_lr=1e-8)
     # training auteoncoder on real
     print('transfer learning encoder to real...')
