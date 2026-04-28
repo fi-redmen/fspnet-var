@@ -350,8 +350,11 @@ class NFautoencoder(nets.Autoencoder):
                 break
 
         self.train(False)
-        final_loss = self._train_val(loaders[1])
-        print(f'\nFinal validation loss: {final_loss:.3e}')
+        self._plot_active = False
+        loss = self._train_val(loaders[1])
+        print(f"\nFinal validation loss: "
+              f"{cast(dict, loss)['total'] if isinstance(loss, dict) else loss:.3e}")
+
 
         self._start_epoch = self._epoch
 
