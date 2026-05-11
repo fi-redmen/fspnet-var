@@ -5,6 +5,7 @@ from netloader.utils.utils import progress_bar
 from netloader import loss_funcs
 from netloader.utils.types import TensorListLike, LossCT, TensorLossCT
 from netloader.data import DataList
+from netloader import models
 
 import numpy as np
 from numpy import ndarray
@@ -15,7 +16,6 @@ from time import time
 from typing import Any, cast
 from warnings import warn
 
-from fspnet.spectrum_fit import AutoencoderNet
 
 class GaussianNLLLoss(loss_funcs.BaseLoss):
     """
@@ -237,7 +237,7 @@ class NFautoencoder(nets.Autoencoder):
         #         separate_loss.append(loss_value)
         #         if self._train_state:
         #             self.separate_losses[key].append(loss_value.clone().item())
-        
+
         # for key, weight in enumerate([self.reconstruct_loss, self.flowlossweight, self.latent_loss]):
         #     if separate_loss[key] is not None:
         #         separate_loss[key] *= weight
@@ -280,24 +280,20 @@ class NFautoencoder(nets.Autoencoder):
             data.detach().cpu().numpy(),
         )
 
-    def training(self, epochs: int, loaders: tuple[DataLoader, DataLoader]) -> None:
+    def training(self, epochs: int, loaders: tuple[DataLoader[Any], DataLoader[Any]]) -> None:
         """
-        Trains & validates the network for each epoch
+        Trains & validates the network for each epoch.
 
         Parameters
         ----------
         epochs : int
             Number of epochs to train the network up to
-        loaders : tuple[DataLoader, DataLoader]
+        loaders : tuple[DataLoader[Any], DataLoader[Any]]
             Train and validation data loaders
         """
+        i: int
         t_initial: float
-        final_loss: float
         loss: LossCT
-
-        # losses=[]
-        # for i in range(len(self.losses[1])):
-        #     losses.append(float(np.mean(self.losses[1][i-10:i])))
 
         # Train for each epoch
         for i in range(self._epoch, epochs):
@@ -308,39 +304,19 @@ class NFautoencoder(nets.Autoencoder):
             self.losses[0].append(self._train_val(loaders[0]))
 
             # Validate network
-            # self.train(False)
-            # self.losses[1].append(self._train_val(loaders[1]))
-            # self._update_scheduler(metrics=self.losses[1][-1])
-
-            # Validate network
             self.train(False)
             self.losses[1].append(self._train_val(loaders[1]))
-            self._update_scheduler(
-                metrics=cast(dict, self.losses[1][-1])['total']
-                if isinstance(self.losses[1][-1], dict) else self.losses[1][-1],
+            self._step(
+                False,
+                i,
+                cast(dict, self.losses[1][-1])['total'] if isinstance(self.losses[1][-1], dict) else
+                self.losses[1][-1],
             )
 
             # Save training progress
             self._update_epoch()
             self.save()
             self._epoch_print(i, epochs, time() - t_initial)
-
-            # if self._verbose in ('full', 'epoch'):
-            #     print(f'Epoch [{self._epoch}/{epochs}]\t'
-            #           f'Training loss: {self.losses[0][-1]:.3e}\t'
-            #           f'Validation loss: {self.losses[1][-1]:.3e}\t'
-            #           f'Time: {time() - t_initial:.1f}')
-            # elif self._verbose == 'progress':
-            #     progress_bar(
-            #         i,
-            #         epochs,
-            #         text=f'Epoch [{self._epoch}/{epochs}]\t'
-            #              f'Training: {self.losses[0][-1]:.3e}\t'
-            #              f'Validation: {self.losses[1][-1]:.3e}\t'
-            #              f'Time: {time() - t_initial:.1f}',
-            #     )
-
-            # losses.append(float(np.mean(self.losses[1][-10:]))) # averages loss over 10 last values
 
             # End plateaued networks early
             if (self._epoch > self._start_epoch + self.scheduler.patience * 2 and
@@ -351,15 +327,13 @@ class NFautoencoder(nets.Autoencoder):
 
         self.train(False)
         self._plot_active = False
+        self._start_epoch = self._epoch
         loss = self._train_val(loaders[1])
         print(f"\nFinal validation loss: "
               f"{cast(dict, loss)['total'] if isinstance(loss, dict) else loss:.3e}")
 
 
-        self._start_epoch = self._epoch
-
-
-class NFautoencoderNetwork(AutoencoderNet):
+class NFautoencoderNetwork(models.MultiNetwork):
     def forward(self, x: torch.Tensor) -> torch.Tensor: # add ,target_uncertainty to arguments
         """
         Forward pass of the autoencoder
@@ -376,14 +350,8 @@ class NFautoencoderNetwork(AutoencoderNet):
         """
         x = self.net[0](x)
         self.checkpoints.append(x)
-        x = x.sample([1])
-        x = x[0]
-
-        # if hasattr(self.net[0], 'kl_loss'): - don't need kl loss?
-        #     self.kl_loss = self.net[0].kl_loss
-
+        x = x.rsample([1])[0]
         return self.net[1](x)   # for non variational
-
 
 
 class NFdecoder(nets.Decoder):
