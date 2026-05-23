@@ -259,7 +259,7 @@ def NF_train(cycle_num: int | None = 0,
     decoder.set_scheduler(decoder.optimiser, min_lr=1e-8,)
     # train decoder on synthetic
     print('training decoder...')
-    # decoder.training(n_epochs, d_loaders)
+    decoder.training(n_epochs, d_loaders)
     print('decoder trained!')
 
     #fix decoder's weights so they dont change while training the encoder
@@ -275,7 +275,7 @@ def NF_train(cycle_num: int | None = 0,
         net.set_scheduler(net.optimiser, min_lr=1e-6,)
     # train autoencoder on synthetic
     print('training encoder on synthetic...')
-    # net.training(n_epochs, d_loaders)
+    net.training(n_epochs, d_loaders)
     print('encoder trained on synthetic!')
 
     # to train only first few layers of encoder - check which layers are indexed
