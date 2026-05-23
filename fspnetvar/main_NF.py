@@ -259,7 +259,7 @@ def NF_train(cycle_num: int | None = 0,
     decoder.set_scheduler(decoder.optimiser, min_lr=1e-8,)
     # train decoder on synthetic
     print('training decoder...')
-    decoder.training(n_epochs, d_loaders)
+    # decoder.training(n_epochs, d_loaders)
     print('decoder trained!')
 
     #fix decoder's weights so they dont change while training the encoder
@@ -275,7 +275,7 @@ def NF_train(cycle_num: int | None = 0,
         net.set_scheduler(net.optimiser, min_lr=1e-6,)
     # train autoencoder on synthetic
     print('training encoder on synthetic...')
-    net.training(n_epochs, d_loaders)
+    # net.training(n_epochs, d_loaders)
     print('encoder trained on synthetic!')
 
     # to train only first few layers of encoder - check which layers are indexed
@@ -286,7 +286,8 @@ def NF_train(cycle_num: int | None = 0,
 
     '''---------- ENCODER TRANSFER LEARNING ----------'''
     # change load and save names for transfer learning
-    net.set_save_path(net._save_path+'_real')
+    net.set_save_path(net._save_path.split('.')[0]+'_real')
+    net.overwrite=True
     # resetting autoencoder optimiser
     if net.get_epochs() == n_epochs:
         net.set_optimiser([
@@ -304,6 +305,7 @@ def NF_train(cycle_num: int | None = 0,
     config['training']['encoder-save'] = root_encoder_name+'_real'
     #initialise new networks
     _, _, _, _, _, real_net = init(config)
+    real_net.overwrite=True
     # keep using old decoder and ensure gradient is still frozen
     real_net.net.net[1] = decoder.net
     # resetting autoencoder optimiser
