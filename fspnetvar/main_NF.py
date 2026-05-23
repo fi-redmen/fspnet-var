@@ -81,21 +81,21 @@ def net_init(
         param_transform = decoder.transforms['inputs']
     else:
 
-        transform = transforms.MultiTransform([
+        transform = transforms.MultiTransform(
             transforms.NumpyTensor(),
             transforms.MinClamp(dim=-1),
             transforms.Log(),
-        ])
+        )
         transform.transforms.append(transforms.Normalise(
             data=transform(datasets[1].spectra),
             mean=False
         ))
 
-        param_transform = transforms.MultiTransform([
+        param_transform = transforms.MultiTransform(
             transforms.NumpyTensor(),
             transforms.MinClamp(dim=0, idxs=log_params),
             transforms.Log(idxs=log_params),
-        ])
+        )
         param_transform.transforms.append(transforms.Normalise(
             data=param_transform(datasets[1].params),
             dim=0,
@@ -137,7 +137,8 @@ def net_init(
         net = NFautoencoder(
             save_num=e_save_num,
             states_dir=states_dir,
-            net=NFautoencoderNetwork(net, decoder.net, name=encoder_name),
+            net=NFautoencoderNetwork(encoder_name, net, decoder.net),
+            overwrite=True,
             learning_rate=learning_rate,
             description=description,
             verbose='full',
@@ -147,12 +148,7 @@ def net_init(
 
         #Loss function settings for autoencoder
         net.reconstruct_func = GaussianNLLLoss() #  gaussian_loss   #
-        net.latent_func = MSELoss()   # mse_loss    #  
-        # net.latent_loss = 0 #3.0e-1
-        # net.flowlossweight = 1 #1e-1 #3.0e-1
-        # net.reconstruct_loss = 1 #1e-3 #4.0e-1
-        # net.kl_loss = 0 #
-        # net.bound_loss = 0 # 3e-1
+        net.latent_func = MSELoss()   # mse_loss    #
 
         net.set_loss_weights(bound=0,
                              kl=0,
@@ -211,7 +207,7 @@ def init(config: dict | str = './config.yaml') -> tuple[
     d_loaders = loader_init(d_dataset, batch_size=batch_size, val_frac=val_frac, idxs=decoder.idxs)
     net.idxs = e_dataset.idxs
     decoder.idxs = d_dataset.idxs
-    
+
     return e_dataset, d_dataset, e_loaders, d_loaders, decoder, net
 
 def NF_train(cycle_num: int | None = 0,
@@ -252,44 +248,34 @@ def NF_train(cycle_num: int | None = 0,
     # load and save names for synthetic training
     config['training']['encoder-load'] = 0
     config['training']['decoder-load'] = 0
-    config['training']['encoder-save'] = root_encoder_name + '_synth'
-    config['training']['decoder-save'] = str(1) + '_test_' + str(cycle_num)
+    config['training']['encoder-save'] = root_encoder_name+'_synth'
+    config['training']['decoder-save'] = str(1) + str(cycle_num)
     #initialise data loaders and networks for synthetic training
     _, _, e_loaders, d_loaders, decoder, net = init(config)
-    
+
     '''---------- DECODER TRAINING ----------'''
     #setting up decoder optimiser
-    decoder.optimiser = optim.AdamW(decoder.net.parameters(), lr=learning_rate)
-    decoder.scheduler = optim.lr_scheduler.ReduceLROnPlateau(decoder.optimiser, min_lr=1e-8,)
+    decoder.set_optimiser(decoder.net.parameters(), lr=learning_rate)
+    decoder.set_scheduler(decoder.optimiser, min_lr=1e-8,)
     # train decoder on synthetic
     print('training decoder...')
-    # decoder.training(n_epochs, d_loaders) 
+    decoder.training(n_epochs, d_loaders)
     print('decoder trained!')
 
     #fix decoder's weights so they dont change while training the encoder
     net.net.net[1] = decoder.net
-    # net.net.net[1].requires_grad_(False)
 
     '''---------- ENCODER TRAINING SYNTHETIC ----------'''
     #setting up autoencoder optimiser
     if net._epoch==0:
-        net.optimiser = optim.AdamW([
+        net.set_optimiser([
             {'params': net.net.net[0].parameters(), 'lr': learning_rate},
-            {'params': net.net.net[1].parameters(), 'lr': learning_rate},
+            {'params': net.net.net[1].parameters(), 'lr': 0},
         ])
-        net.optimiser.param_groups[1]['lr'] = 0
-        # net.optimiser = optim.AdamW(net.net.parameters(), lr=learning_rate)
-        net.scheduler = optim.lr_scheduler.ReduceLROnPlateau(net.optimiser, min_lr=1e-6,)
+        net.set_scheduler(net.optimiser, min_lr=1e-6,)
     # train autoencoder on synthetic
     print('training encoder on synthetic...')
-    d_before = net.net.net[1][2].layers[0].weight.clone()  # Decoder weights sample
-    e_before = net.net.net[0][0].layers[0].weight.clone()  # Encoder weights sample
-    net.training(1, d_loaders)
-    d_after = net.net.net[1][2].layers[0].weight.clone()  # Decoder weights sample
-    e_after = net.net.net[0][0].layers[0].weight.clone()  # Encoder weights sample
-    print(d_before - d_after)
-    print(e_before - e_after)
-    # net.training(n_epochs, d_loaders)
+    net.training(n_epochs, d_loaders)
     print('encoder trained on synthetic!')
 
     # to train only first few layers of encoder - check which layers are indexed
@@ -300,21 +286,17 @@ def NF_train(cycle_num: int | None = 0,
 
     '''---------- ENCODER TRANSFER LEARNING ----------'''
     # change load and save names for transfer learning
-    config['training']['encoder-load'] = root_encoder_name+'_synth'
-    config['training']['encoder-save'] = root_encoder_name+'_synth_real'
-    #re-initialise networks
-    _, _, _, _, _, trans_net = init(config)
-    # keep using old decoder and ensure gradient is still frozen
-    trans_net.net.net[1] = decoder.net
-    # trans_net.net.net[1].requires_grad_(False)
+    net.set_save_path(net._save_path+'_real')
     # resetting autoencoder optimiser
-    if trans_net.get_epochs() == n_epochs:
-        trans_net.optimiser = optim.AdamW(trans_net.net.parameters(), lr=5e-6)
-        trans_net.optimiser.param_groups[1]['lr'] = 0 #freeze decoder weights
-        trans_net.scheduler = optim.lr_scheduler.ReduceLROnPlateau(trans_net.optimiser, factor=0.5, min_lr=1e-8)
-    # training auteoncoder on real
+    if net.get_epochs() == n_epochs:
+        net.set_optimiser([
+            {'params': net.net.net[0].parameters(), 'lr': 5e-6},
+            {'params': net.net.net[1].parameters(), 'lr': 0},
+        ])
+        net.set_scheduler(net.optimiser, factor=0.5, min_lr=1e-8)
+    # training autoencoder on real
     print('transfer learning encoder to real...')
-    trans_net.training(n_epochs*2, e_loaders)
+    net.training(n_epochs*2, e_loaders)
     print('transfer learning complete!')
 
     '''---------- ENCODER TRAINING REAL ONLY ----------'''
@@ -324,19 +306,21 @@ def NF_train(cycle_num: int | None = 0,
     _, _, _, _, _, real_net = init(config)
     # keep using old decoder and ensure gradient is still frozen
     real_net.net.net[1] = decoder.net
-    real_net.net.net[1].requires_grad_(False)
     # resetting autoencoder optimiser
     if real_net._epoch==0:
-        real_net.optimiser = optim.AdamW(real_net.net.parameters(), lr=learning_rate)
-        real_net.scheduler = optim.lr_scheduler.ReduceLROnPlateau(real_net.optimiser, min_lr=1e-8)
+        real_net.set_optimiser([
+            {'params': net.net.net[0].parameters(), 'lr': learning_rate},
+            {'params': net.net.net[1].parameters(), 'lr': 0},
+        ])
+        real_net.set_scheduler(real_net.optimiser, min_lr=1e-8)
     # training auteoncoder on real
     print('training encoder only on real...')
     real_net.training(n_epochs, e_loaders)
     print('training encoder only on real learning complete!')
 
-def NF_predict(net, 
-               e_dataset, d_dataset, 
-               e_loaders, d_loaders, 
+def NF_predict(net,
+               e_dataset, d_dataset,
+               e_loaders, d_loaders,
                names, object_names, pred_savename,
                config: str = './config.yaml'):
     """
@@ -369,9 +353,9 @@ def NF_predict(net,
 
     if isinstance(config, str):
         _, config = open_config('spectrum-fit',config)
-    
+
     root_encoder_name = str(1) + '_test_' + str(cycle_num + 1)
-        
+
     net_transforms = net.transforms.copy()  # save transforms
     for key in net.transforms:      # clear transforms
         net.transforms[key] = None
@@ -398,7 +382,7 @@ def NF_predict(net,
     specific_subset = Subset(e_dataset, data_idxs[np.isin(e_dataset.names, names)].tolist())
     specific_loader = DataLoader(specific_subset, batch_size=64, shuffle=False)
     specific_data = net.predict(specific_loader, num_samples=5000, inputs=True)
-    
+
     # untransforms transfer predictions
     for pred_data in [specific_data, val_data_real]:
         for key, transform in net_transforms.items():
@@ -419,13 +403,13 @@ def NF_predict(net,
     if 'latent' not in specific_data and 'distributions' in val_data_real:
         val_data_real['latent']=val_data_real['distributions']
         val_data_real['preds']=val_data_real['inputs']
-    
+
     # add object names to specific data
     name_to_object = dict(zip(names, object_names))
     new_object_names = [name_to_object[name] for name in specific_data['ids']]
     specific_data['object']=new_object_names
-    
-    # reset transforms 
+
+    # reset transforms
     net.transforms = net_transforms
 
     with open(os.path.join(ROOT,'predictions/val_'+pred_savename+'_synth.pickle'), 'wb') as file:
@@ -434,7 +418,7 @@ def NF_predict(net,
         pickle.dump(specific_data, file)
     with open(os.path.join(ROOT,'predictions/val_'+pred_savename+'.pickle'), 'wb') as file:
         pickle.dump(val_data_real, file)
-    
+
     return val_data_real, specific_data, val_data_synth
 
 def NF_load_preds(pred_savename):
@@ -489,7 +473,7 @@ def load_xspec_preds(specific_data):
 
     # making the same order as specific_data
     xspec_lookup = {obj: i for i, obj in enumerate(xspec_data_unordered['object'])}     # Build a lookup dictionary for xspec objects
-    xspec_indices = [xspec_lookup[obj] for obj in specific_data['object']]              # Get indices in the order of specific_data['object']   
+    xspec_indices = [xspec_lookup[obj] for obj in specific_data['object']]              # Get indices in the order of specific_data['object']
     xspec_data = {                                                                      # Reorder xspec_data to match specific_data order
         'ids': [xspec_data_unordered['id'][i] for i in xspec_indices],
         'object': [xspec_data_unordered['object'][i] for i in xspec_indices],
@@ -498,8 +482,8 @@ def load_xspec_preds(specific_data):
         'chain_time': [xspec_data_unordered['chain_time'][i] for i in xspec_indices]
     }
     # taking 5000 uniformly random distributed data points from last half of the posterior samples
-    new_posteriors = np.array([[random.sample(list(xspec_data['posteriors'] [spec_num][param_num][len(xspec_data['posteriors'][spec_num][param_num])//2:]), 5000) 
-                    for param_num in range(len(xspec_data['posteriors'][0]))] 
+    new_posteriors = np.array([[random.sample(list(xspec_data['posteriors'] [spec_num][param_num][len(xspec_data['posteriors'][spec_num][param_num])//2:]), 5000)
+                    for param_num in range(len(xspec_data['posteriors'][0]))]
                     for spec_num in range(len(xspec_data['posteriors']))])
     xspec_data['posteriors']=new_posteriors
 
@@ -515,10 +499,10 @@ def main(train=False, predict=False, specific=True,
                 print(f'Cycle {cycle_num}/{num_cycles} initialized.')
                 NF_train(cycle_num)
                 print(f'Cycle {cycle_num}/{num_cycles} completed.')
-        else: 
+        else:
             NF_train()
 
-    else: 
+    else:
         e_dataset, d_dataset, e_loaders, d_loaders, decoder, net = init()
 
     '''---------- PREDICTING ----------'''
@@ -535,9 +519,9 @@ def main(train=False, predict=False, specific=True,
     # object_names=['Cyg X-1 (2017)','GRS 1915+105','LMC X-3','MAXI J1535-571','Cyg X-1 (2018)','MAXI J1820 0','MAXI J1820 10','MAXI J1820 11','MAXI J1820 13','MAXI J1820 1','MAXI J1820 3','MAXI J1820 4','MAXI J1820 5','MAXI J1820 6','MAXI J1820 7','MAXI J1820 8','MAXI J1820 9']
 
     # if predict:
-    #     val_data, specific_data, val_data_synth = NF_predict(net, 
-    #                                          e_dataset, d_dataset, 
-    #                                          e_loaders, d_loaders, 
+    #     val_data, specific_data, val_data_synth = NF_predict(net,
+    #                                          e_dataset, d_dataset,
+    #                                          e_loaders, d_loaders,
     #                                          names, object_names, pred_savename)
     # elif os.path.exists(pred_savename):
     #     val_data, specific_data, val_data_synth = NF_load_preds(pred_savename)
@@ -547,7 +531,7 @@ def main(train=False, predict=False, specific=True,
     # overwrite specific_data as none if not plotting specific spectra
     # specific_data = specific_data if specific else None
     # load xspec predictions in same order as specific data
-    # xspec_data = load_xspec_preds(specific_data) 
+    # xspec_data = load_xspec_preds(specific_data)
 
     '''---------- PLOTTING ----------'''
 
@@ -617,7 +601,7 @@ def main(train=False, predict=False, specific=True,
     #     num_dist_specs=250)
 
     # plots_var.coverage_plot(
-    #     dataset=d_dataset, 
+    #     dataset=d_dataset,
     #     loaders=d_loaders,
     #     network = net,
     #     dir_name=plots_directory,
@@ -676,7 +660,7 @@ def main(train=False, predict=False, specific=True,
     # plots_var.labels_plot(data=val_data,
     #                       plot_dir=plots_directory,
     #                       save_name='labels_plot.png')
-    
+
     # # residuals vs total count rate
     # plots_var.resid_params_plot(
     #     data=val_data.copy(),
