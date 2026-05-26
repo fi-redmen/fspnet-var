@@ -3,7 +3,7 @@ from netloader.network import Network
 import netloader.networks as nets
 from netloader.utils.utils import progress_bar
 from netloader import loss_funcs
-from netloader.utils.types import TensorListLike, LossCT, TensorLossCT
+from netloader.utils.types import TensorListLike, LossCT
 from netloader.data import DataList
 from netloader import models
 
@@ -11,11 +11,10 @@ import numpy as np
 from numpy import ndarray
 import torch
 from torch import Tensor, nn
+from torch.optim.optimizer import ParamsT
 from torch.utils.data import DataLoader
 from time import time
 from typing import Any, cast
-from warnings import warn
-
 
 class GaussianNLLLoss(loss_funcs.BaseLoss):
     """
@@ -48,29 +47,35 @@ class MSELoss(loss_funcs.MSELoss):
         return self._loss_func(output[:, 0], target[:, 0])
 
 class NFautoencoder(nets.Autoencoder):
-    def __init__(self,
-                 save_num,
-                 states_dir,
-                 net,
-                 overwrite=True,
-                 mix_precision = False,
-                 learning_rate = 0.001,
-                 description = '',
-                 verbose = 'full',
-                 transform = None,
-                 latent_transform = None):
-        super().__init__(save_num=save_num,
-                         states_dir=states_dir,
-                         net=net,
-                         overwrite=overwrite,
-                         mix_precision=mix_precision,
-                         learning_rate=learning_rate,
-                         description=description,
-                         verbose=verbose,
-                         transform=transform,
-                         latent_transform=latent_transform)
+    def __init__(
+            self,
+            save_num,
+            states_dir,
+            net,
+            overwrite=True,
+            mix_precision = False,
+            learning_rate = 0.001,
+            description = '',
+            verbose = 'full',
+            transform = None,
+            latent_transform = None,
+            optimiser_kwargs: dict[str, Any] | None = None,
+            scheduler_kwargs: dict[str, Any] | None = None):
+        super().__init__(
+            save_num=save_num,
+            states_dir=states_dir,
+            net=net,
+            overwrite=overwrite,
+            mix_precision=mix_precision,
+            learning_rate=learning_rate,
+            description=description,
+            verbose=verbose,
+            transform=transform,
+            latent_transform=latent_transform,
+            optimiser_kwargs=optimiser_kwargs,
+            scheduler_kwargs=scheduler_kwargs,
+        )
         self._start_epoch = 0
-        self.flowlossweight = 0.5
         self.separate_losses = {
             'reconstruct': [],
             'flow': [],
@@ -86,67 +91,23 @@ class NFautoencoder(nets.Autoencoder):
 
     def __getstate__(self) -> dict[str, Any]:
         return super().__getstate__() | {
-            'flowlossweight': self.flowlossweight,
             'separate_losses': self.separate_losses,
             'start_epoch': self._start_epoch,
         }
 
     def __setstate__(self, state: dict[str, Any]) -> None:
         super().__setstate__(state)
-        self.flowlossweight = state['flowlossweight']
         self.separate_losses = state['separate_losses']
         self._start_epoch = state['start_epoch']
         self._loss_weights = state.get('loss_weights', {
             'reconstruct': state.get('reconstruct_loss', 1),
             'latent': state.get('latent_loss', 1),
             'bound': state.get('bound_loss', 1),
+            'flow': state.get('flowlossweight', 1),
             'kl': state.get('kl_loss', 1),
         })
 
-    def _loss(self, in_data: TensorListLike, target: TensorListLike) -> LossCT:
-        """
-        Returns the loss as a float & updates network weights if training.
-
-        Parameters
-        ----------
-        in_data : TensorListLike
-            Input data of shape (N,...) and type float, where N is the number of elements
-        target : TensorListLike
-            Target data of shape (N,...) and type float
-
-        Returns
-        -------
-        LossCT
-            Loss or dictionary of losses which can be summed to get the total loss
-        """
-        key: str
-        value: Tensor
-        loss: TensorLossCT
-
-        with torch.autocast(
-                enabled=self._half,
-                dtype=torch.bfloat16 if self._device == torch.device('cpu') else torch.float16,
-                device_type=self._device.type):
-            try:
-                loss = self._loss_func(in_data, target)
-                warn(
-                    '_loss_func is deprecated, please use _loss_tensor instead',
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
-            except DeprecationWarning:
-                loss = self._loss_tensor(in_data, target)
-
-        if isinstance(loss, dict) and 'total' not in loss:
-            loss['total'] = self._loss_total(loss)
-
-        self._update(loss['total'] if isinstance(loss, dict) else loss)
-
-        if isinstance(loss, dict):
-            return {key: value.item() for key, value in loss.items()}  # type: ignore[return-value]
-        return loss.item()  # type: ignore[return-value]
-
-    def _loss_tensor(self, in_data: TensorListLike, target: TensorListLike) -> dict[str, Tensor]:
+    def _loss_tensor(self, in_data: TensorListLike, target: TensorListLike, _: Any) -> dict[str, Tensor]:
         """
         Calculates the loss from the autoencoder's predictions.
 
@@ -192,73 +153,6 @@ class NFautoencoder(nets.Autoencoder):
             loss['kl'] = self.net.kl_loss
         return loss
 
-    # def _loss(self, in_data: Tensor, target: Tensor) -> float:
-    #     """
-    #     Calculates the loss from the autoencoder's predictions
-
-    #     Parameters
-    #     ----------
-    #     in_data : (N,...) Tensor
-    #         Input high dimensional data of batch size N and the remaining dimensions depend on the
-    #         network used
-    #     target : (N,...) Tensor
-    #         Latent target low dimensional data of batch size N and the remaining dimensions depend
-    #         on the network used
-
-    #     Returns
-    #     -------
-    #     float
-    #         Loss from the autoencoder's predictions'
-    #     """
-    #     loss: Tensor
-    #     latent: Tensor | None = None
-    #     bounds: Tensor = torch.tensor([0., 1.]).to(self._device)
-    #     output: Tensor = self.net(in_data) #,target (for inheriting class)
-
-    #     if self.net.checkpoints:
-    #         latent = self.net.checkpoints[-1].sample([1])[0]
-
-        # Define a dictionary for loss components
-        # loss_components = { #torch.log1p() in recon? - might be unstable trianing for negative values
-        #     'reconstruct':  self.reconstruct_func(output, in_data ),
-        #     'flow': -1 * self.net.checkpoints[-1].log_prob(target).mean(),
-        #     'latent':  self.latent_func(latent, target), #if self.latent_loss and latent is not None else None,
-            # 'bound':  torch.mean(torch.cat((
-            #     (bounds[0] - latent) ** 2 * (latent < bounds[0]),
-            #     (latent - bounds[1]) ** 2 * (latent > bounds[1]),
-            # ))) if self.bound_loss and latent is not None else None,
-            # 'kl': self.kl_loss * self.net.kl_loss if self.kl_loss else None,
-        # }
-
-        # Iterate through the dictionary to process each loss component
-        # separate_loss = []
-        # for key, loss_value in loss_components.items():
-        #     if loss_value is not None:  # Only process non-None losses
-        #         separate_loss.append(loss_value)
-        #         if self._train_state:
-        #             self.separate_losses[key].append(loss_value.clone().item())
-
-        # for key, weight in enumerate([self.reconstruct_loss, self.flowlossweight, self.latent_loss]):
-        #     if separate_loss[key] is not None:
-        #         separate_loss[key] *= weight
-
-        # Compute the total loss
-        # loss = torch.sum(torch.stack(separate_loss))
-
-        # appends each loss component to the separate losses dictionary - for saving separate losses
-        # if self._train_state:
-        #     self.separate_losses["reconstruct"].append(self.reconstruct_func(output, in_data))
-        #     # self.separate_losses["flow"].append(-1 * self.net.checkpoints[-1].log_prob(target).mean())
-        #     self.separate_losses["latent"].append(self.latent_func(latent, target))
-
-        # # sums each loss component with their respective weights - for updating network
-        # loss = torch.sum(torch.stack([self.reconstruct_loss * self.reconstruct_func(output, in_data),
-        #     # self.flowlossweight * -1 * self.net.checkpoints[-1].log_prob(target).mean(),
-        #     self.latent_loss * self.latent_func(latent, target)]))
-
-        # self._update(loss)
-        # return loss.item()
-
     def batch_predict(self, data: Tensor, num_samples, **_: Any) -> tuple[ndarray, ...]:
         """
         Generates predictions for the given data batch
@@ -279,6 +173,12 @@ class NFautoencoder(nets.Autoencoder):
             self.net.checkpoints[-1].sample([num_samples]).swapaxes(0,1).detach().cpu().numpy(),
             data.detach().cpu().numpy(),
         )
+
+    def get_param_groups(self, learning_rate: float | tuple[float, ...] | None) -> ParamsT:
+        return [
+            {'params': self.net[0].parameters(), 'lr': learning_rate},
+            {'params': self.net[1].parameters(), 'lr': 0},
+        ]
 
     def training(self, epochs: int, loaders: tuple[DataLoader[Any], DataLoader[Any]]) -> None:
         """
@@ -348,6 +248,7 @@ class NFautoencoderNetwork(models.MultiNetwork):
         (N,...) list[Tensor] | Tensor
             Output tensor from the network
         """
+        self.checkpoints = []
         x = self.net[0](x)
         self.checkpoints.append(x)
         x = x.rsample([1])[0]
@@ -356,17 +257,19 @@ class NFautoencoderNetwork(models.MultiNetwork):
 
 class NFdecoder(nets.Decoder):
     def __init__(
-    self,
-    save_num: int | str,
-    states_dir: str,
-    net: nn.Module | Network,
-    overwrite = False,
-    mix_precision = False,
-    learning_rate = 1e-3,
-    description = '',
-    verbose = 'full',
-    transform = None,
-    in_transform = None) -> None:
+            self,
+            save_num: int | str,
+            states_dir: str,
+            net: nn.Module | Network,
+            overwrite = False,
+            mix_precision = False,
+            learning_rate = 1e-3,
+            description = '',
+            verbose = 'full',
+            transform = None,
+            in_transform = None,
+            optimiser_kwargs: dict[str, Any] | None = None,
+            scheduler_kwargs: dict[str, Any] | None = None) -> None:
         super().__init__(
             save_num,
             states_dir,
@@ -377,7 +280,10 @@ class NFdecoder(nets.Decoder):
             description=description,
             verbose=verbose,
             transform=transform,
-            in_transform=in_transform)
+            in_transform=in_transform,
+            optimiser_kwargs=optimiser_kwargs,
+            scheduler_kwargs=scheduler_kwargs,
+        )
         self._start_epoch = 0
         self.loss_func = MSELoss()
 
@@ -453,8 +359,5 @@ class NFdecoder(nets.Decoder):
 
         self.train(False)
         final_loss = self._train_val(loaders[1])
-        print(f'\nFinal validation loss: {final_loss:.3e}')
-
         self._start_epoch = self._epoch
-
-
+        print(f'\nFinal validation loss: {final_loss:.3e}')

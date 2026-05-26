@@ -17,14 +17,15 @@ from torch.utils.data import DataLoader, Subset
 from typing import Any
 from astropy.io import fits
 
-import netloader.transforms as transforms
 import netloader.networks as nets
 from netloader.network import Network
+from netloader.data import loader_init
+import netloader.transforms as transforms
 from netloader.utils.utils import save_name, get_device
 
 from fspnet.utils import plots
 from fspnet.utils.utils import open_config
-from fspnet.utils.data import SpectrumDataset, loader_init
+from fspnet.utils.data import SpectrumDataset
 from fspnet.spectrum_fit import pyxspec_tests
 
 import utils.plots_var as plots_var
@@ -114,8 +115,9 @@ def net_init(
             overwrite=True,
             learning_rate=learning_rate,
             description=description,
-            verbose='full',
+            verbose=config['training']['verbose'],
             transform=transform,
+            scheduler_kwargs={'min_lr': 1e-8}
         )
 
         decoder.transforms['inputs'] = param_transform
@@ -138,27 +140,26 @@ def net_init(
             save_num=e_save_num,
             states_dir=states_dir,
             net=NFautoencoderNetwork(encoder_name, net, decoder.net),
+            overwrite=True,
             learning_rate=learning_rate,
             description=description,
-            verbose='full',
+            verbose=config['training']['verbose'],
             transform=transform,
             latent_transform=param_transform,
+            scheduler_kwargs={'min_lr': 1e-6}
         )
 
         #Loss function settings for autoencoder
         net.reconstruct_func = GaussianNLLLoss() #  gaussian_loss   #
         net.latent_func = MSELoss()   # mse_loss    #
-        # net.latent_loss = 0 #3.0e-1
-        # net.flowlossweight = 1 #1e-1 #3.0e-1
-        # net.reconstruct_loss = 1 #1e-3 #4.0e-1
-        # net.kl_loss = 0 #
-        # net.bound_loss = 0 # 3e-1
 
-        net.set_loss_weights(bound=0,
-                             kl=0,
-                             latent=0,
-                             flow=0,
-                             reconstruct=1)
+        net.set_loss_weights(
+            bound=0,
+            kl=0,
+            latent=0,
+            flow=0,
+            reconstruct=1,
+        )
 
     for dataset in datasets:
         # for with uncertainties
@@ -206,12 +207,28 @@ def init(config: dict | str = './config.yaml') -> tuple[
     d_dataset = SpectrumDataset(d_data_path, log_params)
     decoder, net = net_init((e_dataset, d_dataset), config)
 
-    # Initialise datasets
-    e_loaders = loader_init(e_dataset, batch_size=batch_size, val_frac=val_frac, idxs=net.idxs)
-    d_loaders = loader_init(d_dataset, batch_size=batch_size, val_frac=val_frac, idxs=decoder.idxs)
-    net.idxs = e_dataset.idxs
-    decoder.idxs = d_dataset.idxs
+    # Convert old index format to new
+    if net.idxs is not None and len(net.idxs) == len(e_dataset):
+        net.idxs = net.idxs[:-max(int(len(e_dataset) * val_frac), 1)]
 
+    if decoder.idxs is not None and len(decoder.idxs) == len(d_dataset):
+        decoder.idxs = decoder.idxs[:-max(int(len(d_dataset) * val_frac), 1)]
+
+    # Initialise datasets
+    e_loaders = loader_init(
+        e_dataset,
+        batch_size=batch_size,
+        ratios=(1 - val_frac, val_frac) if net.idxs is None or len(net.idxs) == 0 else (1,),
+        idxs=net.idxs if net.idxs is not None and len(net.idxs) else None,
+    )
+    d_loaders = loader_init(
+        d_dataset,
+        batch_size=batch_size,
+        ratios=(1 - val_frac, val_frac) if decoder.idxs is None or len(decoder.idxs) == 0 else (1,),
+        idxs=decoder.idxs if decoder.idxs is not None and len(decoder.idxs) else None,
+    )
+    net.idxs = np.array(e_loaders[0].dataset.indices)
+    decoder.idxs = np.array(d_loaders[0].dataset.indices)
     return e_dataset, d_dataset, e_loaders, d_loaders, decoder, net
 
 def NF_train(cycle_num: int | None = 0,
@@ -245,89 +262,75 @@ def NF_train(cycle_num: int | None = 0,
     # train settings - consistent throughout function
     n_epochs = config['training']['epochs']
     learning_rate = config['training']['learning-rate']
+
     # root state name of encoder
-    if cycle_num: root_encoder_name = str(config['training']['encoder-save']) + '_test_' + str(cycle_num)
-    else: root_encoder_name = str(config['training']['encoder-save'])
+    if cycle_num:
+        root_encoder_name = str(config['training']['encoder-save']) + '_test_' + str(cycle_num)
+    else:
+        root_encoder_name = str(config['training']['encoder-save'])
 
     # load and save names for synthetic training
     config['training']['encoder-load'] = 0
     config['training']['decoder-load'] = 0
     config['training']['encoder-save'] = root_encoder_name + '_synth'
-    config['training']['decoder-save'] = str(1) + '_test_' + str(cycle_num)
+    config['training']['decoder-save'] = str(1) + str(cycle_num)
     #initialise data loaders and networks for synthetic training
-    _, _, e_loaders, d_loaders, decoder, net = init(config)
+    e_dataset, d_dataset, e_loaders, d_loaders, decoder, net = init(config)
 
     '''---------- DECODER TRAINING ----------'''
-    #setting up decoder optimiser
-    decoder.optimiser = optim.AdamW(decoder.net.parameters(), lr=learning_rate)
-    decoder.scheduler = optim.lr_scheduler.ReduceLROnPlateau(decoder.optimiser, min_lr=1e-8,)
     # train decoder on synthetic
     print('training decoder...')
-    # decoder.training(n_epochs, d_loaders)
+    decoder.training(n_epochs, d_loaders)
     print('decoder trained!')
-
-    #fix decoder's weights so they dont change while training the encoder
-    net.net.net[1] = decoder.net
-    # net.net.net[1].requires_grad_(False)
 
     '''---------- ENCODER TRAINING SYNTHETIC ----------'''
     #setting up autoencoder optimiser
-    if net._epoch==0:
-        net.optimiser = optim.AdamW([
-            {'params': net.net.net[0].parameters(), 'lr': learning_rate},
-            {'params': net.net.net[1].parameters(), 'lr': 0},
-        ])
-        # net.optimiser = optim.AdamW(net.net.parameters(), lr=learning_rate)
-        net.scheduler = optim.lr_scheduler.ReduceLROnPlateau(net.optimiser, min_lr=1e-6,)
     # train autoencoder on synthetic
     print('training encoder on synthetic...')
-    d_before = net.net.net[1][2].layers[0].weight.clone()  # Decoder weights sample
-    e_before = net.net.net[0][0].layers[0].weight.clone()  # Encoder weights sample
-    net.training(1, d_loaders)
-    d_after = net.net.net[1][2].layers[0].weight.clone()  # Decoder weights sample
-    e_after = net.net.net[0][0].layers[0].weight.clone()  # Encoder weights sample
-    print(d_before - d_after)
-    print(e_before - e_after)
-    # net.training(n_epochs, d_loaders)
+    net.training(n_epochs, d_loaders)
     print('encoder trained on synthetic!')
 
-    # to train only first few layers of encoder - check which layers are indexed
-    # net.net.net[0].net[2:].requires_grad_(False)
     # uncomment this to use unsupervised training
     # net.latent_loss = 0   # for unsupervised
     # net.flowlossweight = 0
 
     '''---------- ENCODER TRANSFER LEARNING ----------'''
     # change load and save names for transfer learning
-    config['training']['encoder-load'] = root_encoder_name+'_synth'
-    config['training']['encoder-save'] = root_encoder_name+'_synth_real'
-    #re-initialise networks
-    _, _, _, _, _, trans_net = init(config)
-    # keep using old decoder and ensure gradient is still frozen
-    trans_net.net.net[1] = decoder.net
-    # trans_net.net.net[1].requires_grad_(False)
+    net.set_save_path(net.get_save_path().replace('.pth', '_real.pth'), overwrite=True)
+
     # resetting autoencoder optimiser
-    if trans_net.get_epochs() == n_epochs:
-        trans_net.optimiser = optim.AdamW(trans_net.net.parameters(), lr=5e-6)
-        trans_net.optimiser.param_groups[1]['lr'] = 0 #freeze decoder weights
-        trans_net.scheduler = optim.lr_scheduler.ReduceLROnPlateau(trans_net.optimiser, factor=0.5, min_lr=1e-8)
-    # training auteoncoder on real
+    if net.get_epochs() == n_epochs:
+        net.optimiser = net.set_optimiser(net.get_param_groups(5e-6), lr=5e-6)
+        net.scheduler = net.set_scheduler(net.optimiser, factor=0.5, min_lr=1e-8)
+
+    # training autoencoder on real
     print('transfer learning encoder to real...')
-    trans_net.training(n_epochs*2, e_loaders)
+    net.training(n_epochs*2, e_loaders)
     print('transfer learning complete!')
 
     '''---------- ENCODER TRAINING REAL ONLY ----------'''
     config['training']['encoder-load'] = 0
     config['training']['encoder-save'] = root_encoder_name+'_real'
+
     #initialise new networks
-    _, _, _, _, _, real_net = init(config)
+    for dataset in (e_dataset, d_dataset):
+        # for with uncertainties
+        dataset.spectra, dataset.uncertainty = net.transforms['inputs'](
+            dataset.spectra,
+            back=True,
+            uncertainty=dataset.uncertainty,
+        )
+        dataset.params, dataset.param_uncertainty = net.transforms['targets'](
+            dataset.params,
+            back=True,
+            uncertainty=dataset. param_uncertainty,
+        )
+
+    real_net = net_init((e_dataset, d_dataset), config)[1]
+
     # keep using old decoder and ensure gradient is still frozen
     real_net.net.net[1] = decoder.net
-    real_net.net.net[1].requires_grad_(False)
-    # resetting autoencoder optimiser
-    if real_net._epoch==0:
-        real_net.optimiser = optim.AdamW(real_net.net.parameters(), lr=learning_rate)
-        real_net.scheduler = optim.lr_scheduler.ReduceLROnPlateau(real_net.optimiser, min_lr=1e-8)
+
     # training auteoncoder on real
     print('training encoder only on real...')
     real_net.training(n_epochs, e_loaders)
