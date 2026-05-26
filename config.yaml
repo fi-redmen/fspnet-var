@@ -92,7 +92,7 @@ spectrum-fit:
     # can also contain parameters (params) for supervised learning and/or PyXspec validation,
     # and file names (names) if specific files in the directory should be used
     # if parameters are provided and PyXspec validation is used
-    decoder-data-path: *spectra_data_path
+    decoder-data-path: *clean_synthetic_data_path
     # Path to the spectra for encoder training, same format as for decoder
     encoder-data-path: *spectra_data_path
     # Path to the directory of spectra fits files, only required if parameters exists,
