@@ -1,9 +1,7 @@
 from fspnet.utils import plots
 from fspnet.utils.utils import open_config
-from fspnet.spectrum_fit import pyxspec_tests
+from utils.analysis_utils import pyxspec_tests
 
-import utils.plots_var as plots_var
-from utils.misc_utils import sample, get_energy_widths
 from train_NF import init
 
 import pickle
@@ -11,10 +9,7 @@ import random
 from matplotlib import pyplot as plt
 import os
 import numpy as np
-from astropy.io import fits
-import re
 import xspec
-import scienceplots
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 plt.style.use(["science", "grid", 'no-latex'])
