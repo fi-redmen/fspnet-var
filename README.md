@@ -13,7 +13,10 @@ The research paper can be found on [Arxiv](https://arxiv.org/abs/2601.07440)
 
 ## File Descriptions
 **fspnetvar**
-* **main_NF**: Trains variational autoencoder with normalizing flow network, makes predictions, and plots results
+* **train_NF**: Trains variational autoencoder with normalizing flow network
+* **predict_NF**: Makes predictions using trained normalizing flow network
+* **analysis_NF**: Plot results and output reduced PG stats
+* **autoencoder_NF**: Contains class that defines normalizing flow auteoncoder network
 * **main_VAE**: Trains vanilla variational autoencoder network, makes predictions, and plots results
 * **MCMC_chains**: Runs MCMC chains for certain spectra using pyxspec
 
