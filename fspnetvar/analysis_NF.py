@@ -1,17 +1,18 @@
-from fspnet.utils import plots
-from fspnet.utils.utils import open_config
-from utils.analysis_utils import pyxspec_tests
-
-from train_NF import init
-
+import os
 import pickle
 import random
-from matplotlib import pyplot as plt
-import os
-import numpy as np
-import xspec
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+import xspec
+import numpy as np
+import matplotlib.pyplot as plt
+from fspnet.utils import plots
+from fspnetvar.train_NF import init
+from fspnet.utils.utils import open_config
+
+from fspnetvar.utils.misc_utils import ROOT
+from fspnetvar.utils.analysis_utils import pyxspec_tests
+
+
 plt.style.use(["science", "grid", 'no-latex'])
 
 def NF_load_preds(pred_savename, mode):
@@ -28,9 +29,9 @@ def NF_load_preds(pred_savename, mode):
     tuple[dict, dict]
         Tuple containing validation and specific data dictionaries.
     """
-    with open(os.path.join(ROOT,'predictions/'+mode+'/specific_'+pred_savename+'.pickle'), 'rb') as file:
+    with open(os.path.join(ROOT, f'predictions/{mode}/specific_{pred_savename}.pickle'), 'rb') as file:
         specific_data = pickle.load(file)
-    with open(os.path.join(ROOT,'predictions/'+mode+'/val_'+pred_savename+'.pickle'), 'rb') as file:
+    with open(os.path.join(ROOT, f'predictions/{mode}/val_{pred_savename}.pickle'), 'rb') as file:
         val_data = pickle.load(file)
     if 'latent' not in specific_data and 'distributions' in specific_data:
         specific_data['latent']=specific_data['distributions']
@@ -84,7 +85,7 @@ def analysis_NF(config: str = './config.yaml',
 
     '''----------- LOAD NETWORK & DATA ---------'''
     if isinstance(config, str):
-        _, config = open_config('spectrum-fit', config)
+        _, config = open_config('spectrum-fit', os.path.join(ROOT, config))
 
     # loads the networks back in to access losses and for reconstructions
     config['training']['encoder-load'] = load_name
@@ -117,7 +118,7 @@ def analysis_NF(config: str = './config.yaml',
         separate_losses_val['reconstruct'] = [net.losses[1][i]['reconstruct'] for i in range(len(net.losses[1]))]
     if 'flow' in net.losses[1][0].keys():
         separate_losses_val['flow'] = [net.losses[1][i]['flow'] for i in range(len(net.losses[1]))]
-    separate_losses_val['total'] = [net.losses[1][i]['total'] for i in range(len(net.losses[1]))]   
+    separate_losses_val['total'] = [net.losses[1][i]['total'] for i in range(len(net.losses[1]))]
 
     # plot autoencoder performance - remember to change part of net_init to correspond to encoder only vs autoencoder
     # plots.plot_performance(
@@ -134,7 +135,7 @@ def analysis_NF(config: str = './config.yaml',
     #     {key: value for key, value in separate_losses_val.items()},
     #     plots_dir=plots_directory,
     #     save_name='net_performance_sep.png')
-    
+
     # '''---------- LOADING DATA ----------'''
 
     val_data, specific_data = NF_load_preds(load_name, mode)
@@ -272,7 +273,8 @@ def analysis_NF(config: str = './config.yaml',
 
     val_data['latent'] = val_data['latent'][:,0,:] # #np.median(val_data['latent'], axis = 1)
     val_data['targets'] = val_data['targets'][:,0,:]
-    pyxspec_tests(val_data, config=ROOT+'/config.yaml')
+    val_data['ids'] = e_dataset.names[val_data['ids']]
+    pyxspec_tests(val_data, config=os.path.join(ROOT, './config.yaml'))
 
     # print('###--- pyxspec tests results for ', load_name, '---###')
     # print('mean:', np.mean(data_[:, -1].astype(float)))
@@ -293,8 +295,8 @@ def analysis_NF(config: str = './config.yaml',
         _, time1 = net.predict(e_loaders[1], num_samples=1, inputs=True, ret_time=True)
         times1s.append(time1)
 
-    # pyxspec_results = {'mean': np.mean(data_[:, -1].astype(float)), 
-    #                    'std': np.std(data_[:, -1].astype(float)), 
+    # pyxspec_results = {'mean': np.mean(data_[:, -1].astype(float)),
+    #                    'std': np.std(data_[:, -1].astype(float)),
     #                    'median': np.median(data_[:, -1].astype(float)),
     #                    'min_quantile': np.quantile(data_[:, -1].astype(float), 0.157),
     #                    'max_quantile': np.quantile(data_[:, -1].astype(float), 0.843),
@@ -334,7 +336,7 @@ def main():
         else:
             pyxspecs = {'results': [],
                          'name': []}
-            
+
         if load_name in pyxspecs['name']:
             idx = load_name.index(load_name)
             pyxspecs['results'].remove(pyxspecs['results'][idx])
@@ -342,7 +344,7 @@ def main():
 
         pyxspecs['name'].append(load_name)
         pyxspecs['results'].append(analysis_NF(
-            config='./config.yaml',
+            config=os.path.join(ROOT, './config.yaml'),
             load_name=load_name,
             dec_load_name=dec_load_name,
             mode=mode

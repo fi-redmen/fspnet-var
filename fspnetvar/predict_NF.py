@@ -1,13 +1,13 @@
-from fspnet.utils.utils import open_config
-
-from train_NF import init
-
-from torch.utils.data import DataLoader, Subset
-import numpy as np
 import os
 import pickle
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+import numpy as np
+from fspnet.utils.utils import open_config
+from torch.utils.data import DataLoader, Subset
+
+from fspnetvar.train_NF import init
+from fspnetvar.utils.misc_utils import ROOT
+
 
 def NF_predict(load_name, dec_load_name, names, object_names,
                config: str = './config.yaml'):
@@ -38,7 +38,7 @@ def NF_predict(load_name, dec_load_name, names, object_names,
     """
 
     if isinstance(config, str):
-        _, config = open_config('spectrum-fit',config)
+        _, config = open_config('spectrum-fit', os.path.join(ROOT, config))
 
     savedir = ROOT+'/predictions/'+config['output']['network-states-directory'].split('/')[-2 if config['output']['network-states-directory'].endswith('/') else -1]
 
@@ -47,13 +47,13 @@ def NF_predict(load_name, dec_load_name, names, object_names,
     config['training']['decoder-load'] = dec_load_name
     e_dataset, d_dataset, e_loaders, d_loaders, decoder, net = init(config)
     # only predict on synthetic for the synthetically trained model
-    if 'real' in load_name:   
+    if 'real' in load_name:
         pred_dataset = e_dataset
         pred_loaders = e_loaders
     else:
         pred_dataset = d_dataset
         pred_loaders = d_loaders
-    
+
     # save and clear transforms
     net_transforms = net.transforms.copy()  # save transforms
     for key in net.transforms:      # clear transforms
@@ -101,7 +101,7 @@ def NF_predict(load_name, dec_load_name, names, object_names,
 
     with open(os.path.join(savedir,'specific_'+load_name+'.pickle'), 'wb') as file:
         pickle.dump(specific_data, file)
-        
+
     # process and save validation data
     if 'latent' not in specific_data and 'distributions' in val_data:
         val_data['latent']=val_data['distributions']
@@ -111,7 +111,7 @@ def NF_predict(load_name, dec_load_name, names, object_names,
         pickle.dump(val_data, file)
 
     return val_data, specific_data
-    
+
 
 def main():
 

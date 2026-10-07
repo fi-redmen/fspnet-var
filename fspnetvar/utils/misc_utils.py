@@ -2,9 +2,8 @@ import numpy as np
 from numpy import ndarray
 import xspec
 import os
-from astropy.io import fits
-from fspnet.utils.preprocessing import _binning
 
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 PARAM_LIMS: ndarray = np.array([[5.0e-3,75],[1.3,4],[1.0e-3,1],[2.5e-2, 4],[1.0e-2, 1.0e+10]])
 
 def sample(
@@ -23,7 +22,7 @@ def sample(
         Data containing whole distribution to be sampled from
     num_specs:
         Number of spectra to loop over
-    
+
     Returns
     -------
     all_samples: list

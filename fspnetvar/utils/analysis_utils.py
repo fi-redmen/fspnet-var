@@ -1,16 +1,13 @@
-
-
-import numpy as np
-from numpy import ndarray
-
 import os
 import pickle
 from typing import Any, BinaryIO
+
 import numpy as np
 from numpy import ndarray
-
 from fspnet.utils.utils import open_config
 from fspnet.utils.multiprocessing import check_cpus, mpi_multiprocessing
+
+from fspnetvar.utils.misc_utils import ROOT
 
 def pyxspec_test(
         worker_dir: str,
@@ -110,7 +107,7 @@ def pyxspec_tests(
     worker_data: dict[str, Any] = {
         'optimize': True,
         'dirs': [
-            os.path.dirname(os.path.abspath(__file__)),
+            ROOT,
             config['data']['spectra-directory'],
         ],
         'iterations': config['model']['iterations'],
@@ -123,7 +120,7 @@ def pyxspec_tests(
     file: BinaryIO
 
     # Save worker variables
-    with open(f'{worker_dir}worker_data.pickle', 'wb') as file:
+    with open(os.path.join(ROOT, f'{worker_dir}worker_data.pickle'), 'wb') as file:
         pickle.dump(worker_data, file)
 
     # Encoder validation performance

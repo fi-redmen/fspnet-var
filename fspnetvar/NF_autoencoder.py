@@ -1,6 +1,6 @@
 
 from netloader.network import Network
-import netloader.networks as nets
+import netloader.architectures as archs
 from netloader.utils.utils import progress_bar
 from netloader import loss_funcs, models
 from netloader.transforms import BaseTransform
@@ -11,7 +11,6 @@ from netloader.utils.types import (
     NDArrayLike,
     TensorListLike,
     LossCT,
-    TensorLossCT,
 )
 
 import torch
@@ -55,7 +54,7 @@ class MSELoss(loss_funcs.MSELoss):
     def forward(self, output: Tensor, target: Tensor) -> Tensor:
         return self._loss_func(output[:, 0], target[:, 0])
 
-class NFautoencoder(nets.Autoencoder):
+class NFautoencoder(archs.Autoencoder):
     def __init__(
             self,
             save_num,
@@ -237,7 +236,7 @@ class NFautoencoder(nets.Autoencoder):
             self.net.checkpoints[-2].sample([num_samples]).swapaxes(0,1).detach().cpu().numpy(),
             data.detach().cpu().numpy(),
         )
-    
+
     def predict(
             self,
             loader: DataLoader[Any],
@@ -469,11 +468,11 @@ class NFautoencoder(nets.Autoencoder):
             avg_over = 2
             patience_factor=1
             if (self._epoch > self._start_epoch + self.scheduler.patience*patience_factor + avg_over):
-                threshold_losses = [np.mean([np.array(self.losses[1])[-self.scheduler.patience*patience_factor-i][key] 
-                                             for i in range(avg_over)]) 
+                threshold_losses = [np.mean([np.array(self.losses[1])[-self.scheduler.patience*patience_factor-i][key]
+                                             for i in range(avg_over)])
                                              for key in self.losses[1][0].keys() if key!='total']
-                current_losses =  [np.mean([np.array(self.losses[1])[-i][key] 
-                                            for i in range(avg_over)]) 
+                current_losses =  [np.mean([np.array(self.losses[1])[-i][key]
+                                            for i in range(avg_over)])
                                             for key in self.losses[1][0].keys() if key!='total']
                 if all(c > t for c, t in zip(current_losses, threshold_losses)):
                     print('Trial plateaued, ending early...')
@@ -510,7 +509,7 @@ class NFautoencoderNetwork(models.MultiNetwork):
         return self.net[1](x)   # for non variational
 
 
-class NFdecoder(nets.Decoder):
+class NFdecoder(archs.Decoder):
     def __init__(
             self,
             save_num: int | str,

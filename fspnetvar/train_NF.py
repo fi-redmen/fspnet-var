@@ -4,32 +4,35 @@
 # from networkx import config
 
 import os
-import matplotlib.pyplot as plt
-import torch
-from torch import optim
-from torch.utils.data import DataLoader, Subset
-import numpy as np
 from typing import Any
-from astropy.io import fits
-import scienceplots
 
-import netloader.networks as nets
+import numpy as np
+import scienceplots
+import matplotlib.pyplot as plt
+import netloader.architectures as archs
+from netloader import transforms
 from netloader.network import Network
 from netloader.data import loader_init
-import netloader.transforms as transforms
-from netloader.utils.utils import save_name, get_device
-
-from fspnet.utils.utils import open_config
+from netloader.utils import save_name, get_device
 from fspnet.utils.data import SpectrumDataset
-from autoencoder_NF import NFautoencoder, NFautoencoderNetwork, NFdecoder, GaussianNLLLoss, MSELoss
+from fspnet.utils.utils import open_config
+from torch.utils.data import DataLoader
+
+from fspnetvar.utils.misc_utils import ROOT
+from fspnetvar.NF_autoencoder import (
+    NFautoencoder,
+    NFautoencoderNetwork,
+    NFdecoder,
+    GaussianNLLLoss,
+    MSELoss,
+)
 
 plt.style.use(["science", "grid", 'no-latex'])
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 def net_init(
         datasets: tuple[SpectrumDataset, SpectrumDataset],
         config: str | dict[str, Any] = './config.yaml',
-) -> tuple[nets.BaseNetwork, nets.BaseNetwork]:
+) -> tuple[archs.BaseArchitecture, archs.BaseArchitecture]:
     """
     Initialises the network
 
@@ -42,11 +45,11 @@ def net_init(
 
     Returns
     -------
-    tuple[BaseNetwork, BaseNetwork]
+    tuple[BaseArchitecture, BaseArchitecture]
         Constructed decoder and autoencoder
     """
     if isinstance(config, str):
-        _, config = open_config('spectrum-fit', config)
+        _, config = open_config('spectrum-fit', os.path.join(ROOT, config))
 
     # Load config parameters
     e_save_num = config['training']['encoder-save']
@@ -66,7 +69,7 @@ def net_init(
     print('device:', device)
 
     if d_load_num:
-        decoder = nets.load_net(d_load_num, states_dir, decoder_name, weights_only=False)
+        decoder = archs.load_net(d_load_num, states_dir, decoder_name, weights_only=False)
         decoder.description = description
         decoder.save_path = save_name(d_save_num, states_dir, decoder_name)
         transform = decoder.transforms['targets']
@@ -115,7 +118,7 @@ def net_init(
         decoder.loss_func =  GaussianNLLLoss() # gaussian_loss #  #  #changes loss to gaussian loss - can look into other typs of loss
 
     if e_load_num:
-        net = nets.load_net(e_load_num, states_dir, encoder_name, weights_only=False)
+        net = archs.load_net(e_load_num, states_dir, encoder_name, weights_only=False)
         net.description = description
         net.save_path = save_name(e_save_num, states_dir, encoder_name)
     else:
@@ -141,7 +144,7 @@ def net_init(
         )
 
         # to train encoder only - or could just set reconstruct loss = 0
-        # net = nets.NormFlowEncoder(
+        # net = archs.NormFlowEncoder(
         #     save_num=e_save_num,
         #     states_dir=states_dir,
         #     net=net,
@@ -182,8 +185,8 @@ def net_init(
 def init(config: dict | str = './config.yaml') -> tuple[
         tuple[DataLoader, DataLoader],
         tuple[DataLoader, DataLoader],
-        nets.BaseNetwork,
-        nets.BaseNetwork]:
+        archs.BaseArchitecture,
+        archs.BaseArchitecture]:
     """
     Initialises the network and dataloaders
 
@@ -194,11 +197,11 @@ def init(config: dict | str = './config.yaml') -> tuple[
 
     Returns
     -------
-    tuple[tuple[Dataloader, Dataloader], tuple[Dataloader, Dataloader], BaseNetwork, BaseNetwork]
+    tuple[tuple[Dataloader, Dataloader], tuple[Dataloader, Dataloader], BaseArchitecture, BaseArchitecture]
         Train & validation dataloaders for decoder and autoencoder, decoder, and autoencoder
     """
     if isinstance(config, str):
-        _, config = open_config('spectrum-fit', config)
+        _, config = open_config('spectrum-fit', os.path.join(ROOT, config))
 
     # Load config parameters
     batch_size = config['training']['batch-size']
@@ -262,7 +265,7 @@ def NF_train(cycle_num: int | None = 0,
     """
 
     if isinstance(config, str):
-        _, config = open_config('spectrum-fit',config)
+        _, config = open_config('spectrum-fit', os.path.join(ROOT, config))
 
     # train settings - consistent throughout function
     n_epochs = config['training']['epochs']
@@ -304,8 +307,8 @@ def NF_train(cycle_num: int | None = 0,
 
     # resetting autoencoder optimiser
     if net.get_epochs() == n_epochs:
-        net.optimiser = net.set_optimiser(net.get_param_groups(5e-6), lr=5e-6)
-        net.scheduler = net.set_scheduler(net.optimiser, factor=0.5, min_lr=1e-8)
+        net.optimiser = net.init_optimiser(net.get_param_groups(5e-6), lr=5e-6)
+        net.scheduler = net.init_scheduler(net.optimiser, factor=0.5, min_lr=1e-8)
 
     # training autoencoder on real
     print('transfer learning encoder to real...')
@@ -333,7 +336,7 @@ def NF_train(cycle_num: int | None = 0,
     real_net = net_init((e_dataset, d_dataset), config)[1]
 
     # keep using old decoder and ensure gradient is still frozen
-    real_net.net.net[1] = decoder.net
+    real_net.net.layers[1] = decoder.net
 
     # training auteoncoder on real
     print('training encoder only on real...')

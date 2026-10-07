@@ -1,41 +1,23 @@
-
-from fspnet.spectrum_fit import init
-from fspnet.spectrum_fit import AutoencoderNet 
-import xspec
-#from fspnet.utils.data import __get_tiem__
-from astropy.io import fits
-
 import os
-import pickle
-from typing import Any, Self, BinaryIO
+from typing import Any
 
 import torch
 import numpy as np
-from netloader.networks import Decoder
-import netloader.networks as nets
+import matplotlib.pyplot as plt
+import netloader.architectures as archs
 from netloader.network import Network
 from netloader.utils import transforms
 from netloader.utils.utils import save_name, get_device
-from torch.utils.data import DataLoader
-from torch import nn, optim, Tensor
-from numpy import ndarray
-
-from fspnet.utils import plots
-from fspnet.utils.utils import open_config
 from fspnet.utils.data import SpectrumDataset, loader_init
-from fspnet.utils.analysis import autoencoder_saliency, decoder_saliency, pyxspec_test
-from fspnet.spectrum_fit import pyxspec_tests
-from fspnet.utils.plots import plot_param_pairs, _plot_histogram
-
-# from fspnet.utils.multiprocessing
-# from netloader.layers.convolutional
-# from netloader.layers.linear
-
-
-import matplotlib.pyplot as plt
+from fspnet.spectrum_fit import AutoencoderNet
+from fspnet.utils.utils import open_config
+from fspnet.utils import plots
+from torch import nn, optim, Tensor
+from torch.utils.data import DataLoader
 
 from VAE_plots import comparison_plot_NF, distribution_plot_NF, recon_plot_NF, post_pred_plot_NF, latent_space_scatter_NF
 from VAE_plots import param_pair_plot_NF, plot_performance_NF, corner_plot_latent_NF, corner_plot_NF
+
 
 import sciplots
 plt.style.use(["science", "grid", 'no-latex'])
@@ -77,7 +59,7 @@ class TestDataset(torch.utils.data.Dataset):
 def net_init(
         datasets: tuple[SpectrumDataset, SpectrumDataset],
         config: str | dict[str, Any] = './config.yaml',
-) -> tuple[nets.BaseNetwork, nets.BaseNetwork]:
+) -> tuple[archs.BaseArchitecture, archs.BaseArchitecture]:
     """
     Initialises the network
 
@@ -90,7 +72,7 @@ def net_init(
 
     Returns
     -------
-    tuple[BaseNetwork, BaseNetwork]
+    tuple[BaseArchitecture, BaseArchitecture]
         Constructed decoder and autoencoder
     """
     if isinstance(config, str):
@@ -113,13 +95,13 @@ def net_init(
     print('device:', device)
 
     if d_load_num:
-        decoder = nets.load_net(d_load_num, states_dir, decoder_name, weights_only=False)
+        decoder = archs.load_net(d_load_num, states_dir, decoder_name, weights_only=False)
         decoder.description = description
         decoder.save_path = save_name(d_save_num, states_dir, decoder_name)
         transform = decoder.transforms['targets']
         param_transform = decoder.transforms['inputs']
     else:
-        
+
         transform = transforms.MultiTransform([
             transforms.NumpyTensor(),
             transforms.MinClamp(dim=-1),
@@ -150,7 +132,7 @@ def net_init(
             list(datasets[1][0][1].shape),
             list(datasets[1][0][2].shape),
         )
-        decoder = nets.Decoder(
+        decoder = archs.Decoder(
             d_save_num,
             states_dir,
             decoder,
@@ -165,7 +147,7 @@ def net_init(
         decoder.loss_func = gaussian_loss    #changes loss to gaussian loss - can look into other typs of loss
 
     if e_load_num:
-        net = nets.load_net(e_load_num, states_dir, encoder_name, weights_only=False)
+        net = archs.load_net(e_load_num, states_dir, encoder_name, weights_only=False)
         net.description = description
         net.save_path = save_name(e_save_num, states_dir, encoder_name)
     else:
@@ -196,9 +178,9 @@ def net_init(
             transform=transform,
             latent_transform=param_transform,
         )
-        
+
         # chooses to just train encoder
-        # net = nets.Encoder(
+        # net = archs.Encoder(
         #     e_save_num,
         #     states_dir,
         #     net,
@@ -208,13 +190,13 @@ def net_init(
         # )
 
         #changes autoencoder loss for variational autoencoder, mse for non-variational autoencoder
-        net.reconstruct_func = gaussian_loss   
+        net.reconstruct_func = gaussian_loss
         net.latent_func = mse_loss              #adds latent loss as mse
 
         net.latent_loss = 1 #3.0e-1
         net.reconstruct_loss = 1 #4.0e-1
         net.kl_loss = 1 #
-        net.bound_loss = 0 # 3e-1 
+        net.bound_loss = 0 # 3e-1
 
         net.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau( #included scheduler to implement minimum learning rate
             net.optimiser,
@@ -249,8 +231,8 @@ def net_init(
 def init(config: dict | str = './config.yaml') -> tuple[
         tuple[DataLoader, DataLoader],
         tuple[DataLoader, DataLoader],
-        nets.BaseNetwork,
-        nets.BaseNetwork]:
+        archs.BaseArchitecture,
+        archs.BaseArchitecture]:
     """
     Initialises the network and dataloaders
 
@@ -261,7 +243,7 @@ def init(config: dict | str = './config.yaml') -> tuple[
 
     Returns
     -------
-    tuple[tuple[Dataloader, Dataloader], tuple[Dataloader, Dataloader], BaseNetwork, BaseNetwork]
+    tuple[tuple[Dataloader, Dataloader], tuple[Dataloader, Dataloader], BaseArchitecture, BaseArchitecture]
         Train & validation dataloaders for decoder and autoencoder, decoder, and autoencoder
     """
     if isinstance(config, str):
@@ -284,11 +266,11 @@ def init(config: dict | str = './config.yaml') -> tuple[
     d_loaders = loader_init(d_dataset, batch_size=batch_size, val_frac=val_frac, idxs=decoder.idxs)
     net.idxs = e_dataset.idxs
     decoder.idxs = d_dataset.idxs
-    
+
     return e_dataset, d_dataset, e_loaders, d_loaders, decoder, net
 
 
-class Vautoencoder(nets.Autoencoder):
+class Vautoencoder(archs.Autoencoder):
     def __init__(self, save_num, states_dir, net, mix_precision = False, learning_rate = 0.001, description = '', verbose = 'epoch', transform = None, latent_transform = None, in_transform = None):
         super().__init__(save_num, states_dir, net, mix_precision, learning_rate, description, verbose, transform, latent_transform, in_transform)
         self.flowlossweight = 0.0
@@ -299,13 +281,13 @@ class Vautoencoder(nets.Autoencoder):
             'bound': [],
             'kl': []
         }
-    
+
     def __getstate__(self) -> dict[str, Any]:
         return super().__getstate__() | {
             'flowlossweight': self.flowlossweight,
             'separate_losses': self.separate_losses
         }
-    
+
     def __setstate__(self, state: dict[str, Any]) -> None:
         super().__setstate__(state)
         self.flowlossweight = state['flowlossweight']
@@ -338,7 +320,7 @@ class Vautoencoder(nets.Autoencoder):
 
         if self.net.checkpoints:
             latent = self.net.checkpoints[-1][:,0]
-        
+
         # Define a dictionary for loss components
         loss_components = {
             'reconstruct': self.reconstruct_loss * self.reconstruct_func(output, in_data),
@@ -387,7 +369,7 @@ class VautoencoderNetwork(AutoencoderNet):
         if hasattr(self.net[0], 'kl_loss'):
             self.kl_loss = self.net[0].kl_loss
 
-        # return self.net[1](torch.cat((x, self.net[0].checkpoints[-1][:,-1:]), dim=1))     #for variational 
+        # return self.net[1](torch.cat((x, self.net[0].checkpoints[-1][:,-1:]), dim=1))     #for variational
         return self.net[1](x)
 
 '''shows what the data file looks like
@@ -414,8 +396,8 @@ just_err = {
     'sep': True     # plots it separate to parameters
 }
 no_err = {
-    'plot': False, 
-    'sep': False    
+    'plot': False,
+    'sep': False
 }
 
 
@@ -430,7 +412,7 @@ os.makedirs(plots_directory+'reconstructions/', exist_ok=True)
 os.makedirs(plots_directory+'distributions/', exist_ok=True)
 
 # train decoder
-decoder.training(num_epochs, d_loaders) 
+decoder.training(num_epochs, d_loaders)
 
 # #fix decoder's weights so they dont change while training the encoder
 net.net.net[1].requires_grad_(False)
@@ -450,9 +432,9 @@ net.transforms['inputs'] = None
 net.transforms['targets'] = None
 
 #--- making predictions with manually transforming data ---# -- for VAE
-# # predict 
+# # predict
 data = net.predict(e_loaders[-1], path='./predictions/prediction', input_=True)
-names = ['js_ni0100320101_0mpu7_goddard_GTI0.jsgrp', 
+names = ['js_ni0100320101_0mpu7_goddard_GTI0.jsgrp',
             'js_ni0103010102_0mpu7_goddard_GTI0.jsgrp',
             'js_ni1014010102_0mpu7_goddard_GTI30.jsgrp',
             'js_ni1050360115_0mpu7_goddard_GTI9.jsgrp',
@@ -495,7 +477,7 @@ for i in range(len(specific_data['id'])):
     specific_param_uncertainties.append(e_dataset.param_uncertainty[np.isin(e_dataset.names, specific_data['id'][i])])
 specific_param_uncertainties = np.squeeze(np.array(specific_param_uncertainties))
 
-data['targets'] = np.stack(param_transform(data['targets'], back=True, 
+data['targets'] = np.stack(param_transform(data['targets'], back=True,
                            uncertainty=param_uncertainties), axis=1)
 data['inputs'] = np.stack(transform(data['inputs'][:,0], back=True,
                                            uncertainty=data['inputs'][:,1]), axis=1)
@@ -515,10 +497,10 @@ for spec_num,_  in enumerate(data['targets']):
     latent_mu = data['latent'][spec_num][0]
     latent_sig = data['latent'][spec_num][1]
     dist_samples = np.array([
-        np.random.normal(loc=mu, scale=abs(err), size=5000) 
+        np.random.normal(loc=mu, scale=abs(err), size=5000)
         for mu, err in zip(latent_mu, latent_sig)]).swapaxes(0,1)
 
-    # cut_indices = [np.argwhere((dist_sample<=0)) for dist_sample in dist_samples] 
+    # cut_indices = [np.argwhere((dist_sample<=0)) for dist_sample in dist_samples]
     # new_dist_samples = []
     # for dist_sample in dist_samples:
     #     if dist_sample.any()>0:
@@ -535,9 +517,9 @@ for spec_num,_  in enumerate(specific_data['targets']):
     latent_mu = specific_data['latent'][spec_num][0]
     latent_sig = specific_data['latent'][spec_num][1]
     specific_dist_samples = np.array([
-        np.random.normal(loc=mu, scale=abs(err), size=5000) 
+        np.random.normal(loc=mu, scale=abs(err), size=5000)
         for mu, err in zip(latent_mu, latent_sig)]).swapaxes(0,1)
-    # cut_indices = [np.argwhere((dist_sample<=0)) for dist_sample in specific_dist_samples] 
+    # cut_indices = [np.argwhere((dist_sample<=0)) for dist_sample in specific_dist_samples]
     # specific_dist = [np.delete(dist_sample, cut_index) for dist_sample, cut_index in zip(specific_dist_samples, cut_indices)]
     # specific_dist_samples = [ds for ds in specific_dist_samples if ds.any() > 0]
     specific_data_copy['latent'][spec_num] = np.array(specific_dist_samples)
@@ -571,12 +553,12 @@ specific_data = specific_data_copy.copy()
 #     'true_posteriors': []
 # }
 
-# xspec_data['id'] = np.stack((xspec_data0['id'], xspec_data1['id'], xspec_data2['id'], xspec_data3['id'], xspec_data4['id']), axis=0)   
+# xspec_data['id'] = np.stack((xspec_data0['id'], xspec_data1['id'], xspec_data2['id'], xspec_data3['id'], xspec_data4['id']), axis=0)
 # # note: these lists are all different lengths so we keep as a list
-# xspec_data['xspec_recon'] = [xspec_data0['xspec_recon'], 
-#                              xspec_data1['xspec_recon'], 
-#                              xspec_data2['xspec_recon'], 
-#                              xspec_data3['xspec_recon'], 
+# xspec_data['xspec_recon'] = [xspec_data0['xspec_recon'],
+#                              xspec_data1['xspec_recon'],
+#                              xspec_data2['xspec_recon'],
+#                              xspec_data3['xspec_recon'],
 #                              xspec_data4['xspec_recon']]
 # # note: xspec_data['true_posteriors'] shape = number of spectra, number of parameters, number of samples
 # xspec_data['true_posteriors'] = np.stack((xspec_data0['true_posteriors'], xspec_data1['true_posteriors'], xspec_data2['true_posteriors'], xspec_data3['true_posteriors'], xspec_data4['true_posteriors']), axis=0)
@@ -589,7 +571,7 @@ separate_losses = net.separate_losses # shape (number of iterations ((dataset/ba
 # separate_losses = [np.mean(separate_losses[i:i+len(e_loaders[0])], axis=0) for i in range(0, len(separate_losses), len(e_loaders[0]))]
 
 separate_losses['reconstruct'] = [np.mean(separate_losses['reconstruct'][i:i+len(e_loaders[0])], axis=0) for i in range(0, len(separate_losses['reconstruct']), len(e_loaders[0]))]
-separate_losses['flow'] = [np.mean(separate_losses['flow'][i:i+len(e_loaders[0])], axis=0) for i in range(0, len(separate_losses['flow']), len(e_loaders[0]))]  
+separate_losses['flow'] = [np.mean(separate_losses['flow'][i:i+len(e_loaders[0])], axis=0) for i in range(0, len(separate_losses['flow']), len(e_loaders[0]))]
 separate_losses['latent'] = [np.mean(separate_losses['latent'][i:i+len(e_loaders[0])], axis=0) for i in range(0, len(separate_losses['latent']), len(e_loaders[0]))]
 separate_losses['bound'] = [np.mean(separate_losses['bound'][i:i+len(e_loaders[0])], axis=0) for i in range(0, len(separate_losses['bound']), len(e_loaders[0]))]
 separate_losses['kl'] = [np.mean(separate_losses['kl'][i:i+len(e_loaders[0])], axis=0) for i in range(0, len(separate_losses['kl']), len(e_loaders[0]))]
@@ -742,7 +724,7 @@ corner_plot_NF(
 
 # get test_set from specific spectrum MCMC chain
 # net.net.checkpoints[-1].log_prob(data['targets']).mean()
-# npe.flow is 
+# npe.flow is
 # npe_levels, npe_coverages = expected_coverage_mc(npe.flow, testset, device='cuda')
 
 '''--------- PLOTTING PARAMETER PAIRS ----------'''
