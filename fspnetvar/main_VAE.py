@@ -15,8 +15,8 @@ from fspnet.utils import plots
 from torch import nn, optim, Tensor
 from torch.utils.data import DataLoader
 
-from VAE_plots import comparison_plot_NF, distribution_plot_NF, recon_plot_NF, post_pred_plot_NF, latent_space_scatter_NF
-from VAE_plots import param_pair_plot_NF, plot_performance_NF, corner_plot_latent_NF, corner_plot_NF
+from plots_var import comparison_plot_NF, distribution_plot_NF, recon_plot_NF, post_pred_plot_NF, latent_space_scatter_NF
+from plots_var import param_pair_plot_NF, plot_performance_NF, corner_plot_latent_NF, corner_plot_NF
 
 
 import sciplots
