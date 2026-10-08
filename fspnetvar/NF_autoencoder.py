@@ -52,7 +52,7 @@ class MSELoss(loss_funcs.MSELoss):
     Mean Squared Error (MSE) loss function
     """
     def forward(self, output: Tensor, target: Tensor) -> Tensor:
-        return self._loss_func(output[:, 0], target[:, 0])
+        return self._loss_func(output, target)
 
 class NFautoencoder(archs.Autoencoder):
     def __init__(
