@@ -278,8 +278,8 @@ def NF_train(cycle_num: int | None = 0,
         root_encoder_name = str(config['training']['encoder-save'])
 
     # load and save names for synthetic training
-    config['training']['encoder-load'] = 0
-    config['training']['decoder-load'] = 0
+    # config['training']['encoder-load'] = 0
+    # config['training']['decoder-load'] = 0
     config['training']['encoder-save'] = root_encoder_name + '_synth'
     config['training']['decoder-save'] = str(1) + str(cycle_num)
     #initialise data loaders and networks for synthetic training
