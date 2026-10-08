@@ -113,3 +113,102 @@ def get_energy_widths(
     energy_width = np.diff(energy_bins)
 
     return energy_width
+
+
+def add_state_labels(data: dict,
+    feature = ['targets', None],
+    save_dir: str = None,
+    save_name: str = None):
+    """
+    Looks at either the targets or latent to determine and label the spectrum with the state of the BHB in given observation
+
+    Parameters
+    ----------
+    data: dict
+        Dictionary containing the data to label
+    feature: str
+        Whether to use latent (['latent', np.mean], ['latent', np.median] or ['latent', np.mode]) or targets (['targets']) to classify state. Default: targets
+    save_dir: str
+        Where to save the labelled spectra to (if not provided, will not save). Default: no save
+
+    Returns
+    -------
+    labelled_data: dict
+        Data labelled using our classification
+    """
+
+    all_params = feature[1](data[feature[0]], axis=1) if feature[1] else data[feature[0]][:,0,:]
+    labelled_data=data.copy()
+    labelled_data['state']=[]
+
+    # groups different spectra based on parameters
+    for params in all_params:
+        gamma = params[1] # Names parameter to make sure we are using the correct values
+        fsc = params[2]
+        kT = params[3]
+
+        if gamma>2 and fsc<0.1 and kT>0.3:
+            labelled_data['state'].append('Thermal')
+        elif gamma<2.1 and fsc>0.3 and kT<0.5:
+            labelled_data['state'].append('Hard')
+        elif 2.5<gamma<3 and 0.1<fsc<0.6 and kT>0.5:
+            labelled_data['state'].append('SPL')
+        else:
+            labelled_data['state'].append('Misc')
+
+    # makes into array of strings of varying length (to allow for appending ' Pegged') to idexes indexed by list
+    labelled_data['state'] = np.array(labelled_data['state'], dtype=np.dtypes.StringDType())
+
+    # adds ' Pegged' to state if one of the parameters of the observation is at its maximum or minimum
+    pegged_idxs = []
+    for params in all_params.swapaxes(0,1): # params shape = 2160
+        pegged_idxs.append(list(np.argwhere(
+            (params == np.max(params)) |
+            (params == np.min(params))).flatten()))
+
+    # flatten list and remove duplicates 
+    pegged_idxs = list(set([pegged_idx for pegged_idxss in pegged_idxs for pegged_idx in pegged_idxss]))  
+
+    # renames pegged indexes to pegged
+    labelled_data['state'][pegged_idxs] += ' Pegged'
+
+
+    if save_dir and save_name:
+        with open(os.path.join(save_dir, save_name), 'wb') as file:
+            pickle.dump(labelled_data, file)
+    
+    return labelled_data
+
+def order_by_state(data: dict,
+    order: list = ['Thermal', 'Hard', 'SPL', 'Misc', 
+                   'Thermal Pegged', 'Hard Pegged', 'SPL Pegged', 'Misc Pegged']):
+    """
+    Orders data by state
+
+    Parameters
+    ----------
+    data: dict
+
+    """
+    # makes sure data is labelled
+    labelled_data = data if 'state' in data else add_state_labels(data)
+    
+    state = labelled_data['state']
+    def sort_key(i):
+        try:
+            return order.index(state[i])
+        except ValueError:
+            return len(order)  # unknown state go to the end
+
+    perm = sorted(range(len(state)), key=sort_key)
+
+    ordered_data = {}
+    for k, v in labelled_data.items():
+        if isinstance(v, np.ndarray):
+            ordered_data[k] = v[perm]
+        elif isinstance(v, list):
+            ordered_data[k] = [v[i] for i in perm]
+        else:
+            ordered_data[k] = v
+
+    return ordered_data
