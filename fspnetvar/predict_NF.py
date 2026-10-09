@@ -77,8 +77,13 @@ def NF_predict(load_name, dec_load_name, names, object_names,
                 pred_data[key] = np.stack(transform(pred_data[key][:,0], back=True,
                                                 uncertainty=pred_data[key][:,1]), axis=1)
             elif key == 'targets':
+                idxs = []
+                for pred_id in pred_data['ids']:
+                    for j, name in enumerate(dataset.names):
+                        if pred_id==name:
+                            idxs.append(j)
                 pred_data[key] = np.stack(transform(pred_data[key], back=True,
-                                            uncertainty=dataset.param_uncertainty[np.isin(dataset.names, pred_data['ids'])].numpy()), axis=1)
+                                            uncertainty=dataset.param_uncertainty[idxs].numpy()), axis=1)
             else:
                 pred_data[key] = transform(pred_data[key], back=True)
 
