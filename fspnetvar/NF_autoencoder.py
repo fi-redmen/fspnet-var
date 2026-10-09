@@ -44,7 +44,7 @@ class GaussianNLLLoss(loss_funcs.BaseLoss):
         self._loss_func = nn.GaussianNLLLoss(*self._args, **self._kwargs)
 
     def forward(self, output: Tensor, target: Tensor) -> Tensor:
-        return self._loss_func(output[:, 0], target[:, 0], target[:, 1] ** 2)
+        return self._loss_func(output, target[:, 0], target[:, 1] ** 2)
 
 
 class MSELoss(loss_funcs.MSELoss):
