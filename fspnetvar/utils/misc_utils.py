@@ -35,7 +35,7 @@ def sample(
         # gets num_samples sets of parameter samples from dist_lats
         dist_lats = data['latent'][spec_num]
         samples=[]
-        indexes = np.random.randint(0, len(dist_lats[1]), size=num_samples)
+        indexes = np.random.randint(0, dist_lats.shape[0], size=num_samples)
         for i in indexes:
             params = dist_lats[i]
             # if param_limits are given, applies them
