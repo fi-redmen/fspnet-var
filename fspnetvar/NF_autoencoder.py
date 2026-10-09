@@ -465,16 +465,16 @@ class NFautoencoder(archs.Autoencoder):
             self._epoch_print(i, epochs, time() - t_initial)
 
             # End plateaued networks early
-            avg_over = 2
-            patience_factor=1
+            avg_over = 10
+            patience_factor = 2
             if (self._epoch > self._start_epoch + self.scheduler.patience*patience_factor + avg_over):
-                threshold_losses = [np.mean([np.array(self.losses[1])[-self.scheduler.patience*patience_factor-i][key]
-                                             for i in range(avg_over)])
-                                             for key in self.losses[1][0].keys() if key!='total']
-                current_losses =  [np.mean([np.array(self.losses[1])[-i][key]
-                                            for i in range(avg_over)])
+                threshold_losses = [np.array([self.losses[0][-i][key]+0.2*abs(np.array(self.losses[0][-i][key]))
+                                             for i in range(1,avg_over+1)])
+                                             for key in self.losses[0][0].keys() if key!='total']
+                current_losses = [np.array([self.losses[1][-i][key]
+                                            for i in range(1,avg_over+1)])
                                             for key in self.losses[1][0].keys() if key!='total']
-                if all(c > t for c, t in zip(current_losses, threshold_losses)):
+                if all(np.all(c > t) for c, t, in zip(current_losses, threshold_losses)):
                     print('Trial plateaued, ending early...')
                     break
 
@@ -565,11 +565,6 @@ class NFdecoder(archs.Decoder):
         t_initial: float
         final_loss: float
 
-        losses=[]
-
-        for i in range(len(self.losses[1])):
-            losses.append(float(np.mean(self.losses[1][i-10:i])))
-
         # Train for each epoch
         for i in range(self._epoch, epochs):
             t_initial = time()
@@ -602,21 +597,18 @@ class NFdecoder(archs.Decoder):
                         f'Time: {time() - t_initial:.1f}',
                 )
 
-            losses.append(float(np.mean(self.losses[1][-10:]))) # averages loss over 10 last values
-
             # End plateaued networks early
-            if (self._epoch > self._start_epoch + self.scheduler.patience*3 + 10):
-                threshold_loss = np.mean(self.losses[1][-self.scheduler.patience*3-10:-self.scheduler.patience*3])
-                current_loss =  np.mean(self.losses[1][-10:])
-                if current_loss > threshold_loss:
+            avg_over = 10
+            patience_factor=2
+            if (self._epoch > self._start_epoch + self.scheduler.patience*patience_factor + avg_over):
+                threshold_loss = np.array(self.losses[0][-avg_over:])+0.2*abs(np.array(self.losses[0][-avg_over:]))
+                current_loss = np.array(self.losses[1][-avg_over:])
+                if all(current_loss > threshold_loss):
+                    print('threshold loss:', threshold_loss)
+                    print('current_loss:', current_loss)
                     print('Trial plateaued, ending early...')
                     break
-            # if self._epoch > self._start_epoch + self.scheduler.patience * 1 + 10:
-            #     threshold_loss = np.mean(self.losses[1][-self.scheduler.patience*1-10:-self.scheduler.patience*5])
-            #     current_loss =  np.mean(self.losses[1][-10:])
-            #     if current_loss > threshold_loss:
-            #         print('Trial plateaued, ending early...')
-            #         break
+
 
         self.train(False)
         final_loss = self._train_val(loaders[1])
