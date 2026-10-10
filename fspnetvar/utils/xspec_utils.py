@@ -7,7 +7,6 @@ import os
 import re
 import pickle
 
-
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PARAM_LIMS: ndarray = np.array([[5.0e-3,75],[1.3,4],[1.0e-3,1],[2.5e-2, 4],[1.0e-2, 1.0e+10]])
 
@@ -82,9 +81,9 @@ def xspec_reconstruction(
     xspec.Xset.logChatter = 0
 
     # gets info from provided spectrum file
-    if type(spectrum) is str or type(spectrum) is not int: # could maybe change to os.path_exists..??
+    if os.path.exists(os.path.join(data_dir,spectrum)):
         data_dir+= 'spectra/'
-        with fits.open(data_dir+ spectrum) as file:
+        with fits.open(os.path.join(data_dir,spectrum)) as file:
             spectrum_info = file[1].header
 
     else:
