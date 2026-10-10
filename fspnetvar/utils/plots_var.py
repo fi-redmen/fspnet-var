@@ -191,7 +191,7 @@ def comparison_plot(
         To choose which specific spectrum to take, from a list of spectra names.
     """
 
-    num_specs = np.min([len(specific_data['targets'].swapaxes(1,2).swapaxes(0,1)),num_specs]) if specific_data else None
+    num_specs = np.min([len(specific_data['targets']),num_specs]) if specific_data else None
     colors = COLORS_DICT if specific_data else COLORS_LIST
 
     fig, axes = plt.subplot_mosaic('aabbcc\ndddeee', figsize=(16,14))
@@ -224,13 +224,13 @@ def comparison_plot(
         # for taking maximum from the distibution rather than frist sample
         # lat = [np.max(data['latent'].swapaxes(1,2).swapaxes(1,0)[i][j]) for j in range(0,SCATTER_NUM)] # or np.max(data['latent'][:SCATTERNUM,:,:], axis=1)
 
-        if list(colour_map):
+        if colour_map and list(colour_map):
             Norm = pltcolors.LogNorm(vmin=np.min(colour_map), vmax=np.max(colour_map))  if log_colour_map else pltcolors.Normalize(vmin=np.min(colour_map), vmax=np.max(colour_map))
             axis.scatter(x=targ, y=lat, linestyle='None', c=colour_map[:SCATTER_NUM], alpha=0.5, s=7, cmap=plt.cm.colors.ListedColormap(new_cmap), norm=Norm)
         else:
             axis.scatter(x=targ, y=lat, linestyle='None', color='grey', alpha=0.3, s=3)
 
-    if list(colour_map):
+    if colour_map and list(colour_map):
         cbar = fig.colorbar(plt.cm.ScalarMappable(norm=Norm, cmap=plt.cm.colors.ListedColormap(new_cmap)), ax=axes.values(), orientation='horizontal',  label=colour_map_label, aspect=40)
         cbar.ax.xaxis.label.set_size(MINOR)
         cbar.ax.tick_params(labelsize=MINOR)
@@ -260,7 +260,7 @@ def comparison_plot(
         axis.plot([np.min(grey_targ), np.max(grey_targ)], [np.min(grey_targ), np.max(grey_targ)], color='k')
 
         for spec_num in range(0,num_dist_specs):
-            if list(colour_map):
+            if colour_map and list(colour_map):
                 if log_colour_map:
                     Norm = pltcolors.LogNorm(vmin=np.min(colour_map), vmax=np.max(colour_map))
                 else:
