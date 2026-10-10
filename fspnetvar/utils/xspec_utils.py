@@ -17,12 +17,8 @@ def reduced_PG(
     data_dir = ROOT+'/data/spectra/'
     ):
 
-    # params = [2.0, 2.5, 2.0e-2, 1.0, 1.0]  # Example parameters for the model
-
+    currdir = os.getcwd()
     os.chdir(data_dir)
-
-    # with fits.open(spec_name) as file:
-    #     spectrum_info = file[1].header
 
     xspec.Xset.chatter = 0
     xspec.Xset.logChatter = 0
@@ -51,6 +47,8 @@ def reduced_PG(
 
     xspec.AllData.clear()
     xspec.AllModels.clear()
+
+    os.chdir(currdir)
 
     return value
 
@@ -138,5 +136,8 @@ def xspec_reconstruction(
     # get data from plot
     xs_energies = xspec.Plot.x()
     xs_recon = np.array(xspec.Plot.y())/det_num
+
+    xspec.AllData.clear()
+    xspec.AllModels.clear()
 
     return xs_energies, xs_recon
