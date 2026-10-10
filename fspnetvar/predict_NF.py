@@ -108,7 +108,7 @@ def NF_predict(load_name, dec_load_name, names, object_names,
         pickle.dump(specific_data, file)
 
     # process and save validation data
-    if 'latent' not in specific_data and 'distributions' in val_data:
+    if 'latent' not in val_data and 'distributions' in val_data:
         val_data['latent']=val_data['distributions']
         val_data['preds']=val_data['inputs']
 
