@@ -330,30 +330,38 @@ def main():
 
         print(f'analysing for load_name : {load_name}...')
 
-        if os.path.exists('./pyxspec_tests/'+mode+'/all_results.pkl'):
-            with open('./pyxspec_tests/'+mode+'/all_results.pkl', 'rb') as f:
-                pyxspecs = pickle.load(f)
-        else:
-            pyxspecs = {'results': [],
-                         'name': []}
-
-        if load_name in pyxspecs['name']:
-            idx = load_name.index(load_name)
-            pyxspecs['results'].remove(pyxspecs['results'][idx])
-            pyxspecs['name'].remove(load_name)
-
-        pyxspecs['name'].append(load_name)
-        pyxspecs['results'].append(analysis_NF(
+        analysis_NF(
             config=os.path.join(ROOT, './config.yaml'),
             load_name=load_name,
             dec_load_name=dec_load_name,
             mode=mode
-        ))
+        )
 
         print('analysis ', load_name, 'complete!')
 
-        with open('./pyxspec_tests/'+mode+'/all_results.pkl', 'wb') as f:
-            pickle.dump(pyxspecs, f)
+        # to save pyxspec test stuff - first need to fix pyxspec tests: 
+        # if os.path.exists('./pyxspec_tests/'+mode+'/all_results.pkl'):
+        #     with open('./pyxspec_tests/'+mode+'/all_results.pkl', 'rb') as f:
+        #         pyxspecs = pickle.load(f)
+        # else:
+        #     pyxspecs = {'results': [],
+        #                  'name': []}
+
+        # if load_name in pyxspecs['name']:
+        #     idx = load_name.index(load_name)
+        #     pyxspecs['results'].remove(pyxspecs['results'][idx])
+        #     pyxspecs['name'].remove(load_name)
+
+        # pyxspecs['name'].append(load_name)
+        # pyxspecs['results'].append(analysis_NF(
+        #     config=os.path.join(ROOT, './config.yaml'),
+        #     load_name=load_name,
+        #     dec_load_name=dec_load_name,
+        #     mode=mode
+        # ))
+
+        # with open('./pyxspec_tests/'+mode+'/all_results.pkl', 'wb') as f:
+        #     pickle.dump(pyxspecs, f)
 
 if __name__ == '__main__':
     main()
