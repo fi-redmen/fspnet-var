@@ -534,7 +534,7 @@ def latent_corner_plot(
             plt.savefig(os.path.join(dir_name, 'latent_corner_plot'+str(spec_num)+'.png'), dpi=300)
             
             # add sample lines
-            if in_param_samples:
+            if list(in_param_samples):
                 param_samples = in_param_samples[spec_num]
                 for bottom_plot_num in range(0,len(param_samples[0])):
                     for left_plot_num in range(0,bottom_plot_num+1):
@@ -723,11 +723,11 @@ def recon_plot(
         targs = specific_data['targets'][spec_num][0] if specific_data else data['targets'][spec_num][0]
         lats = specific_data['latent'][spec_num][0] if specific_data else data['latent'][spec_num][0]
         spec_name = specific_data['ids'][spec_num] if specific_data else data['ids'][spec_num]
-        color_id = spec_name if specific_data else None
+        color_id = spec_name if specific_data else 0
         colors = COLORS_DICT if specific_data else COLORS_LIST*num_specs
         
         # if we have given samples, use those instead of data['lats'][0]
-        if all_param_samples:
+        if list(all_param_samples):
             lats = all_param_samples[spec_num][0]
 
         # input spectrum and errors
@@ -852,7 +852,7 @@ def post_pred_plot(
     colors = COLORS_DICT if specific_data else COLORS_LIST*num_specs
 
     # if we haven't been given the samples already
-    if not post_pred_samples:
+    if post_pred_samples is None:
         if  specific_data:
             post_pred_samples = sample(specific_data, num_specs=num_specs, num_samples=n_samples)
         else:
@@ -993,7 +993,7 @@ def post_pred_plot_xspec(
     colors = COLORS_DICT if specific_data else COLORS_LIST*num_specs
 
     # if we haven't been given the samples already
-    if not post_pred_samples:
+    if post_pred_samples is None:
         post_pred_samples = sample(specific_data if specific_data else data, num_specs=num_specs, num_samples=n_samples)
 
     # looping over each spectrum
