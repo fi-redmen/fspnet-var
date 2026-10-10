@@ -138,7 +138,7 @@ for spec_num in range(len(spectra)):
     xspec_model.simplcutx.Gamma.values = str(targets[spec_num,0,1])+',,1.3,1.3,4,4'
     xspec_model.simplcutx.FracSctr = str(targets[spec_num,0,2])+',,1.0e-3,1.0e-3,1,1'
     xspec_model.ezdiskbb.T_max = str(targets[spec_num,0,3])+',,2.5e-2,2.5e-2,4,4'
-    xspec_model.ezdiskbb.norm = str(targets[spec_num,0,4])+',,1.0e-2,1.0e-2,1.0e+10,1.0e-10'
+    xspec_model.ezdiskbb.norm = str(targets[spec_num,0,4])+',,1.0e-2,1.0e-2,1.0e+10,1.0e+10'
 
     xspec_model.setPars(pars)
     xspec_model.simplcutx.ReflFrac.frozen = True
