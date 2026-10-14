@@ -1,17 +1,20 @@
+import sys
+sys.path.insert(0, "./")
+
 import os
 import pickle
 import random
-
 import xspec
 import numpy as np
 import matplotlib.pyplot as plt
+
 from fspnet.utils import plots
-from fspnetvar.train_NF import init
 from fspnet.utils.utils import open_config
 
-from fspnetvar.utils.misc_utils import ROOT
-from fspnetvar.utils.analysis_utils import pyxspec_tests
-
+from train_NF import init
+from utils.misc_utils import ROOT
+from utils.analysis_utils import pyxspec_tests
+from utils import plots_var
 
 plt.style.use(["science", "grid", 'no-latex'])
 
@@ -236,9 +239,9 @@ def analysis_NF(config: str = './config.yaml',
     #     in_param_samples=all_param_samples)
 
     # # # scatter plot across all target parameters in dataset
-    # plots_var.param_pairs_plot(
-    #     data=val_data,
-    #     dir_name=plots_directory)
+    plots_var.param_pairs_plot(
+        data=val_data,
+        dir_name=plots_directory)
 
     # # 2D reconstruction plots
     # plots_var.rec_2d_plot(
