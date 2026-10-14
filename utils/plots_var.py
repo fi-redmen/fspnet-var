@@ -19,7 +19,7 @@ from chainconsumer import Chain, ChainConsumer, PlotConfig
 from fspnet.utils.plots import plot_param_pairs, _plot_histogram
 from netloader.utils.utils import get_device
 
-from utils.plot_utils import get_energies, decoder_reconstruction, quantile_limits, MidPointLogNorm
+from utils.plot_utils import get_energies, decoder_reconstruction, quantile_limits #, MidPointLogNorm
 from utils.misc_utils import sample, add_state_labels, order_by_state
 from utils.xspec_utils import xspec_reconstruction, reduced_PG, xspec_data
 
@@ -632,35 +632,35 @@ def param_pairs_plot(
     param_names: list[str]
         The names of the parameters to plot.
     """
+
+    # Plot scatter plots & histograms for target
     param_pair_axes = plot_param_pairs(
-    data=np.array(data['targets'][:,0,:]),
-    plots_dir=dir_name,
-    save_name='param_pair_plot',
-    log_params=log_params,
-    param_names=param_names,
-    colour='#4cb555',
-    scatter_colour='#4cb555',
-    alpha=0.7,
-    )
+        data=np.array(data['targets'][:,0,:]),
+        plots_dir=dir_name,
+        save_name='param_pair_plot',
+        log_params=log_params,
+        param_names=param_names,
+        colour='#4cb555',
+        scatter_colour='#4cb555',
+        alpha=0.7)
 
     param_pair_data=data['latent'][:,0,:].swapaxes(0,1)
     ranges = [None] * param_pair_data.shape[0]
-    # Plot scatter plots & histograms
-    # for i, (axes_row, y_data, y_range) in enumerate(zip(param_pair_axes, param_pair_data, ranges)):
-    #         for j, (axis, x_data, x_range) in enumerate(zip(axes_row, param_pair_data, ranges)):
-    #             if i == j:
-    #                 _plot_histogram(x_data, axis, log=i in log_params, data_range=x_range, colour='#8445cc', alpha=0.5)
-    #                 axis.tick_params(labelleft=False, left=False)
-    #             elif j < i:
-    #                 axis.scatter(
-    #                     x_data[:1000],
-    #                     y_data[:1000],
-    #                     s=20,
-    #                     alpha=0.3,
-    #                     color='#8445cc'
-    #                 )
-    #             else:
-    #                 axis.set_visible(False)
+    # Plot scatter plots & histograms for latent
+    for i, (axes_row, y_data, y_range) in enumerate(zip(param_pair_axes, param_pair_data, ranges)):
+            for j, (axis, x_data, x_range) in enumerate(zip(axes_row, param_pair_data, ranges)):
+                if i == j:
+                    _plot_histogram(x_data, axis, log=i in log_params, data_range=x_range, colour='#8445cc', alpha=0.5)
+                    axis.tick_params(labelleft=False, left=False)
+                elif j < i:
+                    axis.scatter(
+                        x_data[:1000],
+                        y_data[:1000],
+                        s=20,
+                        alpha=0.1,
+                        color='#8445cc')
+                else:
+                    axis.set_visible(False)
     
     legend_elements = [Line2D([0], [0], color='#4cb555', label="Targets", linestyle='None', marker='o', alpha=0.5, markersize=10),
                        Line2D([0], [0], color='#8445cc', label="Predicted", linestyle='None', marker='o', alpha=0.5, markersize=10)]

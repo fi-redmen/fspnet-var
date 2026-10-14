@@ -141,3 +141,55 @@ def xspec_reconstruction(
     xspec.AllModels.clear()
 
     return xs_energies, xs_recon
+
+def xspec_data(spectrum: str|int,
+    data_dir: str | None = os.path.join(ROOT,'FSPNet/data/')):
+    """
+    Gets the raw data by plotting in xspec - same dimensions as Xspec reconstruction
+    """
+
+    # if not synthetic gets info from provided spectrum file
+    if type(spectrum) is not int: # could maybe change to os.path_exists..??
+        data_dir+='spectra/'
+        with fits.open(data_dir+ spectrum) as file:
+            spectrum_info = file[1].header
+        
+        os.chdir(data_dir)
+
+        xspec.AllModels.setEnergies("0.001 1000. 1500 log")
+        xspec.Plot.xAxis="keV"
+        xspec.Plot.background = True
+        xspec.AllModels.systematic = 0.
+        xspec.Fit.statMethod = 'pgstat'
+        xspec.Xset.abund = "wilm"
+
+        det_num=int(re.search(r'_d(\d+)', spectrum_info['RESPFILE']).group(1))
+
+        xspec.AllData.clear()   # laod actual data file in xspec
+        s = xspec.Spectrum(spectrum)
+        s.ignore("**-0.3 10.0-**")
+
+        r = s.response
+        rmfFileName = r.rmf
+        arfFileName = r.arf  
+
+        print('response used for xspec data')
+        print('rmf', rmfFileName)
+        print('arf', arfFileName)
+
+        xspec.Plot.xLog=True    # plot xspec data
+        xspec.Plot("data")
+
+        xs_energies = xspec.Plot.x()   # get xspec reconstruction from plot
+        xs_counts = np.array(xspec.Plot.y()) / det_num
+        xs_counts_err = np.array(xspec.Plot.yErr()) / det_num
+
+    # if synthetic gets info from provided spectrum file
+    else:
+        with open(data_dir+'synth_spectra_clean.pickle', 'rb') as file:
+            synthetic_data = pickle.load(file)
+            xs_energies = None  # doesn't return energies if synthetic, as these are the same as the decoder energies - use get_energies()
+            xs_counts = synthetic_data['spectra'][spectrum]
+            xs_counts_err = synthetic_data['uncertainties'][spectrum]
+
+    return xs_energies, xs_counts, xs_counts_err
