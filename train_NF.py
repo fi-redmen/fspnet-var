@@ -1,7 +1,5 @@
-# from NFautoencoder import NFautoencoder, net_init, GaussianNLLLoss, MSELoss
-# import pandas as pd
-# from netloader_tests import TestConfig, gen_indexes, mod_network
-# from networkx import config
+import sys
+sys.path.insert(0, "./")
 
 import os
 from typing import Any
@@ -14,12 +12,12 @@ from netloader import transforms
 from netloader.network import Network
 from netloader.data import loader_init
 from netloader.utils import save_name, get_device
-from fspnet.utils.data import SpectrumDataset
+from data import SpectrumDataset
 from fspnet.utils.utils import open_config
 from torch.utils.data import DataLoader
 
-from fspnetvar.utils.misc_utils import ROOT
-from fspnetvar.NF_autoencoder import (
+from utils.misc_utils import ROOT
+from NF_autoencoder import (
     NFautoencoder,
     NFautoencoderNetwork,
     NFdecoder,

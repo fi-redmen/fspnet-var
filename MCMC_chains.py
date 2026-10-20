@@ -9,8 +9,7 @@ import time
 
 from fspnet.utils.utils import open_config
 
-ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-print(ROOT)
+from utils.misc_utils import ROOT
 
 def run_MCMC_chains():
     # load spectra names, object names and targets

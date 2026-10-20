@@ -25,7 +25,7 @@ from utils.xspec_utils import xspec_reconstruction, reduced_PG, xspec_data
 
 mpl.rcParams['agg.path.chunksize'] = 10000
 
-ROOT = os.path.dirname(os.path.abspath(__file__))
+from utils.misc_utils import ROOT
 SYNTHETIC_DIR: str = ROOT+'/data/synth_spectra_clean.pickle'
 
 RECTANGLE: tuple[int, int] = (16, 9)

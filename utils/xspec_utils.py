@@ -7,7 +7,7 @@ import os
 import re
 import pickle
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+from utils.misc_utils import ROOT
 PARAM_LIMS: ndarray = np.array([[5.0e-3,75],[1.3,4],[1.0e-3,1],[2.5e-2, 4],[1.0e-2, 1.0e+10]])
 
 def reduced_PG(

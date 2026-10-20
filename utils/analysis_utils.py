@@ -7,7 +7,7 @@ from numpy import ndarray
 from fspnet.utils.utils import open_config
 from fspnet.utils.multiprocessing import check_cpus, mpi_multiprocessing
 
-from fspnetvar.utils.misc_utils import ROOT
+from utils.misc_utils import ROOT
 
 def pyxspec_test(
         worker_dir: str,

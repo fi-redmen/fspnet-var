@@ -101,27 +101,27 @@ def analysis_NF(config: str = './config.yaml',
         os.makedirs(plots_directory)
 
     # plot decoder performance
-    plots.plot_performance(
-        'Loss',
-        decoder.losses[1][1:],
-        plots_dir= plots_directory,
-        train=decoder.losses[0][1:],
-        save_name='dec_performance')
+    # plots.plot_performance(
+    #     'Loss',
+    #     decoder.losses[1][1:],
+    #     plots_dir= plots_directory,
+    #     train=decoder.losses[0][1:],
+    #     save_name='dec_performance')
 
     # make separete losses dictionary
-    separate_losses_train = {}
-    if 'reconstruct' in net.losses[0][0].keys():
-        separate_losses_train['reconstruct'] = [net.losses[0][i]['reconstruct'] for i in range(len(net.losses[0]))]
-    if 'flow' in net.losses[0][0].keys():
-        separate_losses_train['flow'] = [net.losses[0][i]['flow'] for i in range(len(net.losses[0]))]
-    separate_losses_train['total'] = [net.losses[0][i]['total'] for i in range(len(net.losses[0]))]
+    # separate_losses_train = {}
+    # if 'reconstruct' in net.losses[0][0].keys():
+    #     separate_losses_train['reconstruct'] = [net.losses[0][i]['reconstruct'] for i in range(len(net.losses[0]))]
+    # if 'flow' in net.losses[0][0].keys():
+    #     separate_losses_train['flow'] = [net.losses[0][i]['flow'] for i in range(len(net.losses[0]))]
+    # separate_losses_train['total'] = [net.losses[0][i]['total'] for i in range(len(net.losses[0]))]
 
-    separate_losses_val = {}
-    if 'reconstruct' in net.losses[1][0].keys():
-        separate_losses_val['reconstruct'] = [net.losses[1][i]['reconstruct'] for i in range(len(net.losses[1]))]
-    if 'flow' in net.losses[1][0].keys():
-        separate_losses_val['flow'] = [net.losses[1][i]['flow'] for i in range(len(net.losses[1]))]
-    separate_losses_val['total'] = [net.losses[1][i]['total'] for i in range(len(net.losses[1]))]
+    # separate_losses_val = {}
+    # if 'reconstruct' in net.losses[1][0].keys():
+    #     separate_losses_val['reconstruct'] = [net.losses[1][i]['reconstruct'] for i in range(len(net.losses[1]))]
+    # if 'flow' in net.losses[1][0].keys():
+    #     separate_losses_val['flow'] = [net.losses[1][i]['flow'] for i in range(len(net.losses[1]))]
+    # separate_losses_val['total'] = [net.losses[1][i]['total'] for i in range(len(net.losses[1]))]
 
     # plot autoencoder performance - remember to change part of net_init to correspond to encoder only vs autoencoder
     # plots.plot_performance(
@@ -239,9 +239,9 @@ def analysis_NF(config: str = './config.yaml',
     #     in_param_samples=all_param_samples)
 
     # # # scatter plot across all target parameters in dataset
-    plots_var.param_pairs_plot(
-        data=val_data,
-        dir_name=plots_directory)
+    # plots_var.param_pairs_plot(
+    #     data=val_data,
+    #     dir_name=plots_directory)
 
     # # 2D reconstruction plots
     # plots_var.rec_2d_plot(
@@ -276,7 +276,7 @@ def analysis_NF(config: str = './config.yaml',
 
     val_data['latent'] = val_data['latent'][:,0,:] # #np.median(val_data['latent'], axis = 1)
     val_data['targets'] = val_data['targets'][:,0,:]
-    val_data['ids'] = e_dataset.names[val_data['ids']]
+    # val_data['ids'] = e_dataset.names[val_data['ids']]
     pyxspec_tests(val_data, config=os.path.join(ROOT, './config.yaml'))
 
     # print('###--- pyxspec tests results for ', load_name, '---###')
