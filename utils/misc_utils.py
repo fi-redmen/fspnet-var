@@ -2,16 +2,18 @@ import numpy as np
 from numpy import ndarray
 import xspec
 import os
+from typing import Any
+
+from fspnet.utils.utils import open_config
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-PARAM_LIMS: ndarray = np.array([[5.0e-3,75],[1.3,4],[1.0e-3,1],[2.5e-2, 4],[1.0e-2, 1.0e+10]])
 
 def sample(
     data: dict,
-    param_limits: ndarray = PARAM_LIMS,
     num_specs = 1,
     num_samples = 1,
-    spec_scroll=0
+    spec_scroll=0,
+    config: str | dict[str, Any] = './config.yaml',
     ):
     '''
     Samples from given distribution (made up of many samples)
@@ -29,6 +31,11 @@ def sample(
         Samples accross spectra, number of samples we want for that spectrum, and the number of parameter distributions we are sampling from
         - Shape: spectrum number, sample number, parameter number
     '''
+
+    if isinstance(config, str):
+        _, config = open_config('synthesize-spectra', os.path.join(ROOT, config))
+
+    param_limits = np.array([list(lim.values()) for lim in config['model']['parameter-limits']])
 
     all_samples = []
     for spec_num in range(spec_scroll,num_specs+spec_scroll):

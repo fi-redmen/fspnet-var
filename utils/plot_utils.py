@@ -5,13 +5,14 @@ import xspec
 import pickle
 import re
 import os
+from typing import Any
 
 import matplotlib.pyplot as plt
 from matplotlib.figure import FigureBase
 from matplotlib.axes import Axes
 
 from utils.misc_utils import ROOT
-PARAM_LIMS: ndarray = np.array([[5.0e-3,75],[1.3,4],[1.0e-3,1],[2.5e-2, 4],[1.0e-2, 1.0e+10]])
+from fspnet.utils.utils import open_config
 
 def make_margins(
     axis: Axes,
@@ -198,12 +199,18 @@ def quantile_limits(
     min_quant, 
     max_quant, 
     param_names,
-    param_lims = PARAM_LIMS,
     NF_data = None,
     xspec_gauss_data = None,
     xspec_MCMC_data = None,
-    object_name = None
+    object_name = None,
+    config: str | dict[str, Any] = './config.yaml',
     ):
+
+    if isinstance(config, str):
+        _, config = open_config('synthesize-spectra', os.path.join(ROOT, config))
+
+    param_lims = np.array([list(lim.values()) for lim in config['model']['parameter-limits']])
+
 
     # creating array out of all input dataframes to find minimum value in
     all_data = []

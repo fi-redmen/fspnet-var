@@ -12,7 +12,7 @@ from fspnet.utils import plots
 from fspnet.utils.utils import open_config
 
 from train_NF import init
-from utils.misc_utils import ROOT
+from utils.misc_utils import ROOT, sample
 from utils.analysis_utils import pyxspec_tests
 from utils import plots_var
 
@@ -199,9 +199,9 @@ def analysis_NF(config: str = './config.yaml',
     #     coverage_dir='./coverages/'+mode,
     #     overwrite=False)
 
-    # all_param_samples = sample(specific_data if specific_data else val_data,
-    #                         num_specs=len(specific_data['ids']),
-    #                         num_samples=1)
+    all_param_samples = sample(specific_data if specific_data else val_data,
+                            num_specs=len(specific_data['ids']),
+                            num_samples=1)
 
     # # # single reconstructions using samples from all_param_samples
     # plots_var.recon_plot(
