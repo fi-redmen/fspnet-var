@@ -8,12 +8,10 @@ import re
 import pickle
 
 from utils.misc_utils import ROOT
-PARAM_LIMS: ndarray = np.array([[5.0e-3,75],[1.3,4],[1.0e-3,1],[2.5e-2, 4],[1.0e-2, 1.0e+10]])
 
 def reduced_PG(
     params,
     spec_name,
-    param_limits: ndarray = PARAM_LIMS,
     data_dir = ROOT+'/data/spectra/'
     ):
 
