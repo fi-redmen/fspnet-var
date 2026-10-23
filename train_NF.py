@@ -157,7 +157,6 @@ def net_init(
 
         #Loss function settings for autoencoder
         net.reconstruct_func = GaussianNLLLoss() #  gaussian_loss   #
-        # net.latent_func = GaussianNLLLoss()   # mse_loss    #
 
         net.set_loss_weights(
             bound=0,
@@ -304,7 +303,7 @@ def NF_train(cycle_num: int | None = 0,
     net.set_save_path(net.get_save_path().replace('.pth', '_real.pth'), overwrite=True)
 
     # change loss function to gaussian NNL
-    net.loss_func = GaussianNLLLoss()
+    net.latent_func = GaussianNLLLoss()
 
     # resetting autoencoder optimiser
     if net.get_epochs() == n_epochs:
