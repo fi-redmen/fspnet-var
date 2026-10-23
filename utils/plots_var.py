@@ -25,8 +25,7 @@ from utils.xspec_utils import xspec_reconstruction, reduced_PG, xspec_data
 
 mpl.rcParams['agg.path.chunksize'] = 10000
 
-from utils.misc_utils import ROOT
-SYNTHETIC_DIR: str = ROOT+'/data/synth_spectra_clean.pickle'
+from utils.misc_utils import ROOT, SYNTHETIC_DIR
 
 RECTANGLE: tuple[int, int] = (16, 9)
 MAJOR: int = 32
@@ -56,6 +55,7 @@ MAX_QUANT: dict = {
     NAMES[3]: 0.999,
     NAMES[4]: 0.999}
 COLORS_DICT: dict = {}
+
 for key in NAMES:
     COLORS_DICT[key] = COLORS_LIST[NAMES.index(key)]
     if NAMES.index(key) >=5:
@@ -75,7 +75,6 @@ def performance_plot(
         y_label: str,
         loss_fns_train: dict,
         loss_fns_val: dict,
-        log_y: bool = True,
         plots_dir: str | None = None,
         save_name: str | None = 'performance.png') -> None:
     """
@@ -99,7 +98,6 @@ def performance_plot(
     plt.figure(figsize=RECTANGLE, constrained_layout=True)
 
     text = ''
-    total_loss_fn = np.zeros(len(loss_fns_train['reconstruct']))
 
     # makes function positive so logging possible
     move = abs(min([min(v) if v else 0 for k, v in loss_fns_train.items()]))+1
@@ -251,6 +249,8 @@ def comparison_plot(
     # loop through parameters, plotting n_points sampled from num_dist_specs spectra
     multi_targs = data['targets'].swapaxes(1,2).swapaxes(0,1)
     multi_lats = data['latent'].swapaxes(1,2).swapaxes(0,1)
+    num_dist_specs_an = 250 # number of spectra to use for PCC etc.
+    idxs_arr = [random.sample(range(len(multi_lats[0,:num_dist_specs_an,:].flatten())), 50) for i in range(100)] # allow the same idxs to be used for each parameter
     for i, (targ, lat, axis, grey_targ) in enumerate(zip(multi_targs, multi_lats, axes.values(), grey_targs)):
         # targ[spectrum number][0=value, 1=error]
         # clear axis from single samples
@@ -277,7 +277,6 @@ def comparison_plot(
                 axis.scatter(x=[targ[spec_num][0]]*n_points, y=lat[spec_num][:n_points], linestyle='None', color='grey', alpha=0.05, s=10)
         
         n_points_an = 100
-        num_dist_specs_an = 250
         x_PCC_data = np.repeat(targ[:num_dist_specs_an,0], n_points_an, axis=0).flatten()
         y_PCC_data = lat[:num_dist_specs_an,:n_points_an].flatten()
         x_PCC_data = np.log10(x_PCC_data) if i in log_params else x_PCC_data
@@ -293,8 +292,7 @@ def comparison_plot(
         fit_lines = []
         x_fit = np.linspace(np.min(grey_targ), np.max(grey_targ), 100000)
         # Samples 100 points out of each of the num_disst_specs_an distributions, and does 1000 fits
-        for i in range(100):
-            idxs = random.sample(range(len(lat[:num_dist_specs_an,:].flatten())), 50)
+        for idxs in idxs_arr:
 
             x = np.array([targ[:num_dist_specs_an,0] for _ in range(len(lat[0]))]).swapaxes(0,1).flatten()[idxs]
             y = lat[:num_dist_specs_an,:].flatten()[idxs]

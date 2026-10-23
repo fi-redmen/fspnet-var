@@ -7,6 +7,7 @@ from typing import Any
 from fspnet.utils.utils import open_config
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+SYNTHETIC_DIR: str = ROOT+'/data/synth_spectra_clean.pickle'
 
 def sample(
     data: dict,

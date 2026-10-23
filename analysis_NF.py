@@ -7,12 +7,14 @@ import random
 import xspec
 import numpy as np
 import matplotlib.pyplot as plt
+from astropy.io import fits
+import re
 
 from fspnet.utils import plots
 from fspnet.utils.utils import open_config
 
 from train_NF import init
-from utils.misc_utils import ROOT, sample
+from utils.misc_utils import ROOT, sample, get_energy_widths
 from utils.analysis_utils import pyxspec_tests
 from utils import plots_var
 
@@ -96,7 +98,7 @@ def analysis_NF(config: str = './config.yaml',
     e_dataset, d_dataset, e_loaders, d_loaders, decoder, net = init(config)
 
     '''---------- PLOTTING PERFORMANCE ----------'''
-    plots_directory = ROOT+'/plots/'+mode+'/'+load_name+'/'
+    plots_directory = os.path.join(ROOT,'plots',mode,load_name+'/')
     if not os.path.exists(plots_directory):
         os.makedirs(plots_directory)
 
@@ -155,49 +157,49 @@ def analysis_NF(config: str = './config.yaml',
 
     # '''---------- PLOTTING RESULTS ----------'''
 
-    # # # plotting comparison between parameters
-    # # # to color data by certain parameters
-    # kT = val_data['targets'][:,0,3]
-    # Norm = val_data['targets'][:,0,4]
-    # nH = list(val_data['targets'][:,0,0])
-    # gamma = list(val_data['targets'][:,0,1])
-    # fsc = list(val_data['targets'][:,0,2])
-    # det_nums=[]
+    # # plotting comparison between parameters
+    # # to color data by certain parameters
+    kT = val_data['targets'][:,0,3]
+    Norm = val_data['targets'][:,0,4]
+    nH = list(val_data['targets'][:,0,0])
+    gamma = list(val_data['targets'][:,0,1])
+    fsc = list(val_data['targets'][:,0,2])
+    det_nums=[]
 
-    # if 'real' in load_name:
-    #     for spectrum in val_data['ids']:
-    #         with fits.open(os.path.join(ROOT,'data','spectra',spectrum)) as file:
-    #             spectrum_info = file[1].header
+    if 'real' in load_name:
+        for spectrum in val_data['ids']:
+            with fits.open(os.path.join(ROOT,'data','spectra',spectrum)) as file:
+                spectrum_info = file[1].header
 
-    #         det_nums.append(int(re.search(r'_d(\d+)', spectrum_info['RESPFILE']).group(1)))
+            det_nums.append(int(re.search(r'_d(\d+)', spectrum_info['RESPFILE']).group(1)))
 
-    # else:
-    #     with open(os.path.join(ROOT,'data','synth_spectra_clean.pickle'), 'rb') as file:
-    #         synthetic_data = pickle.load(file)
-    #     det_nums = [int(re.search(r'_d(\d+)', synthetic_data['info'][spectrum].response[5:]).group(1)) for spectrum in val_data['ids']]
+    else:
+        with open(os.path.join(ROOT,'data','synth_spectra_clean.pickle'), 'rb') as file:
+            synthetic_data = pickle.load(file)
+        det_nums = [int(re.search(r'_d(\d+)', synthetic_data['info'][spectrum].response[5:]).group(1)) for spectrum in val_data['ids']]
 
-    # det_nums = np.array(det_nums)[:,np.newaxis]
-    # widths = get_energy_widths()[np.newaxis]
-    # total_counts=np.sum(val_data['inputs'][:,0,:]*det_nums*widths, axis=-1)
+    det_nums = np.array(det_nums)[:,np.newaxis]
+    widths = get_energy_widths()[np.newaxis]
+    total_counts=np.sum(val_data['inputs'][:,0,:]*det_nums*widths, axis=-1)
 
-    # plots_var.comparison_plot(
-    #     val_data,
-    #     specific_data=specific_data,
-    #     log_colour_map=True,
-    #     colour_map=total_counts,
-    #     colour_map_label='Total Count Rate',
-    #     dir_name=os.path.join(plots_directory, 'comparisons/'),
-    #     n_points=50,
-    #     num_dist_specs=250)
+    plots_var.comparison_plot(
+        val_data,
+        specific_data=specific_data,
+        log_colour_map=True,
+        colour_map=total_counts,
+        colour_map_label='Total Count Rate',
+        dir_name=os.path.join(plots_directory, 'comparisons/'),
+        n_points=50,
+        num_dist_specs=250)
 
-    # plots_var.coverage_plot(
-    #     dataset=pred_dataset,
-    #     loaders=pred_loaders,
-    #     network = net,
-    #     dir_name=plots_directory,
-    #     pred_savename=load_name,
-    #     coverage_dir='./coverages/'+mode,
-    #     overwrite=False)
+    plots_var.coverage_plot(
+        dataset=pred_dataset,
+        loaders=pred_loaders,
+        network = net,
+        dir_name=plots_directory,
+        pred_savename=load_name,
+        coverage_dir='./coverages/'+mode,
+        overwrite=False)
 
     all_param_samples = sample(specific_data if specific_data else val_data,
                             num_specs=len(specific_data['ids']),
@@ -207,7 +209,7 @@ def analysis_NF(config: str = './config.yaml',
     # plots_var.recon_plot(
     #     decoder.net,
     #     net,
-    #     dir_name = plots_directory+'reconstructions/',
+        # dir_name = os.path.join(plots_directory,'reconstructions/'),
     #     data = val_data,
     #     specific_data = specific_data,
     #     all_param_samples = all_param_samples,
@@ -217,14 +219,14 @@ def analysis_NF(config: str = './config.yaml',
     # post_pred_samples = plots_var.post_pred_plot(
     #     decoder.net,
     #     net,
-    #     dir_name = plots_directory+'reconstructions/',
+    #     dir_name = os.path.join(plots_directory,'reconstructions/'),
     #     data = val_data,
     #     specific_data = specific_data,
     #     data_dir = os.path.join(ROOT,'data','spectra/'))
 
     # # # # # # posterior predictive plots only using xspec to make reconstructions - not decoder
     # plots_var.post_pred_plot_xspec(
-    #     dir_name = plots_directory+'reconstructions/',
+    #     dir_name = os.path.join(plots_directory,'reconstructions/'),
     #     data = val_data,
     #     specific_data = specific_data,
     #     post_pred_samples=post_pred_samples,
@@ -232,7 +234,7 @@ def analysis_NF(config: str = './config.yaml',
 
     # # # # # latent space corner plot
     # plots_var.latent_corner_plot(
-    #     dir_name = plots_directory+'distributions/',
+    #     dir_name =os.path.join(plots_directory,'distributions/'),
     #     data=val_data,
     #     xspec_data=xspec_data,
     #     specific_data=specific_data,
@@ -245,7 +247,7 @@ def analysis_NF(config: str = './config.yaml',
 
     # # 2D reconstruction plots
     # plots_var.rec_2d_plot(
-    #     plot_dir = plots_directory+'reconstructions/',
+    #     plot_dir = os.path.join(plots_directory,'reconstructions/'),
     #     data=val_data)
 
     # # # Gamma Vs scattered fraction coloured by state
@@ -258,7 +260,7 @@ def analysis_NF(config: str = './config.yaml',
     #     data=val_data.copy(),
     #     x_param=total_counts,
     #     x_param_name='Total Count Rate',
-    #     plot_dir=plots_directory+'comparisons/',
+    #     plot_dir=os.path.join(plots_directory,'comparisons/'),
     #     save_name='Param_resids_tcr.png')
 
     # # residuals vs normalisation/disk temperature
@@ -266,7 +268,7 @@ def analysis_NF(config: str = './config.yaml',
     #     data=val_data.copy(),
     #     x_param=Norm/fsc,
     #     x_param_name='N/fsc',
-    #     plot_dir=plots_directory+'comparisons/',
+    #     plot_dir=os.path.join(plots_directory,'comparisons/'),
     #     save_name = 'Param_Resids_NkT.png')
 
     '''---------- pyxspec tests ----------'''
@@ -277,7 +279,7 @@ def analysis_NF(config: str = './config.yaml',
     val_data['latent'] = val_data['latent'][:,0,:] # #np.median(val_data['latent'], axis = 1)
     val_data['targets'] = val_data['targets'][:,0,:]
     # val_data['ids'] = e_dataset.names[val_data['ids']]
-    pyxspec_tests(val_data, config=os.path.join(ROOT, './config.yaml'))
+    pyxspec_tests(val_data, config=config)
 
     # print('###--- pyxspec tests results for ', load_name, '---###')
     # print('mean:', np.mean(data_[:, -1].astype(float)))
@@ -306,9 +308,9 @@ def analysis_NF(config: str = './config.yaml',
     #                    'time1000': str(np.mean(time1000s))+r'$\pm$'+str(np.std(time1000s)),
     #                    'time1': str(np.mean(times1s))+r'$\pm$'+str(np.std(times1s))}
 
-    # if not os.path.exists(ROOT+'/pyxspec_tests/'+mode+'/'):
-    #     os.mkdir(ROOT+'/pyxspec_tests/'+mode+'/')
-    # with open(ROOT+'/pyxspec_tests/'+mode+'/'+load_name+'.pkl', 'wb') as f:
+    # if not os.path.exists(os.path.join(ROOT,'pyxspec_tests',mode+'/')):
+    #     os.mkdir(os.path.join(ROOT,'pyxspec_tests',mode+'/'))
+    # with open(os.path.join(ROOT,'pyxspec_tests',mode,load_name+'.pkl'), 'wb') as f:
     #     pickle.dump(pyxspec_results, f)
 
     # return pyxspec_results
@@ -343,8 +345,8 @@ def main():
         print('analysis ', load_name, 'complete!')
 
         # to save pyxspec test stuff - first need to fix pyxspec tests: 
-        # if os.path.exists('./pyxspec_tests/'+mode+'/all_results.pkl'):
-        #     with open('./pyxspec_tests/'+mode+'/all_results.pkl', 'rb') as f:
+        # if os.path.exists(os.path.join('./pyxspec_tests/',mode,'/all_results.pkl')):
+        #     with open(os.path.exists('./pyxspec_tests/',mode,'/all_results.pkl'), 'rb') as f:
         #         pyxspecs = pickle.load(f)
         # else:
         #     pyxspecs = {'results': [],
@@ -363,7 +365,7 @@ def main():
         #     mode=mode
         # ))
 
-        # with open('./pyxspec_tests/'+mode+'/all_results.pkl', 'wb') as f:
+        # with open(os.path.join('./pyxspec_tests/',mode,'/all_results.pkl'), 'wb') as f:
         #     pickle.dump(pyxspecs, f)
 
 if __name__ == '__main__':

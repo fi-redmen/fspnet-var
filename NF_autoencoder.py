@@ -201,7 +201,10 @@ class NFautoencoder(archs.Autoencoder):
             loss['reconstruct'] = self.reconstruct_func(output, in_data)
 
         if self.get_loss_weights('latent') and latent is not None:
-            loss['latent'] = self.latent_func(latent, target)
+            if self.latent_func._name == 'MSELoss':
+                loss['latent'] = self.latent_func(latent, target[:,0,:])    
+            else:
+                loss['latent'] = self.latent_func(torch.unsqueeze(latent, 1), target) 
 
         if self.get_loss_weights('bound') and latent is not None:
             loss['bound'] = torch.mean(torch.cat((
@@ -210,7 +213,7 @@ class NFautoencoder(archs.Autoencoder):
             )))
 
         if self.get_loss_weights('flow'):
-            loss['flow'] = -1 * self.net.checkpoints[-2].log_prob(target).mean()
+            loss['flow'] = -1 * self.net.checkpoints[-2].log_prob(target[:,0,:]).mean()
 
         if self.get_loss_weights('kl'):
             loss['kl'] = self.net.kl_loss
@@ -383,7 +386,7 @@ class NFautoencoder(archs.Autoencoder):
             for i, (_, low_dim, high_dim, *extra) in enumerate(loader):
                 t_initial = time()
                 in_data, target = cast(
-                    tuple[TensorListLike, TensorListLike],
+                    tuple[TensorListLike, TensorListLike, TensorListLike],
                     self._data_loader_translation(
                         data_collation(low_dim, data_field=False).to(self._device),
                         data_collation(high_dim, data_field=False).to(self._device),

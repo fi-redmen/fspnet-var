@@ -97,7 +97,7 @@ def net_init(
         decoder = Network(
             decoder_name,
             networks_dir,
-            list(datasets[1][0][1].shape),
+            list(datasets[1][0][1][0].shape),
             list(datasets[1][0][2].shape),
         )
         decoder = NFdecoder(
@@ -124,7 +124,7 @@ def net_init(
             encoder_name,
             networks_dir,
             list(datasets[0][0][2].shape),
-            list(datasets[0][0][1].shape),
+            list(datasets[0][0][1][0].shape),
         )
 
         # to train autoencoder_NF
@@ -157,7 +157,7 @@ def net_init(
 
         #Loss function settings for autoencoder
         net.reconstruct_func = GaussianNLLLoss() #  gaussian_loss   #
-        net.latent_func = MSELoss()   # mse_loss    #
+        # net.latent_func = GaussianNLLLoss()   # mse_loss    #
 
         net.set_loss_weights(
             bound=0,
@@ -302,6 +302,9 @@ def NF_train(cycle_num: int | None = 0,
     '''---------- ENCODER TRANSFER LEARNING ----------'''
     # change load and save names for transfer learning
     net.set_save_path(net.get_save_path().replace('.pth', '_real.pth'), overwrite=True)
+
+    # change loss function to gaussian NNL
+    net.loss_func = GaussianNLLLoss()
 
     # resetting autoencoder optimiser
     if net.get_epochs() == n_epochs:

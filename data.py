@@ -108,7 +108,10 @@ class SpectrumDataset(Dataset):
         # ))
     
         # only includes uncertainties in spectra
-        return self.names[idx], self.params[idx], module.stack((
+        return self.names[idx], module.stack((
+            self.params[idx],
+            self.param_uncertainty[idx]
+        )), module.stack((
             self.spectra[idx],
             self.uncertainty[idx],
         ))

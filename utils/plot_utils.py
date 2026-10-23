@@ -1,14 +1,9 @@
 from numpy import ndarray
 import numpy as np
 from astropy.io import fits
-import xspec
-import pickle
-import re
 import os
 from typing import Any
 
-import matplotlib.pyplot as plt
-from matplotlib.figure import FigureBase
 from matplotlib.axes import Axes
 
 from utils.misc_utils import ROOT
