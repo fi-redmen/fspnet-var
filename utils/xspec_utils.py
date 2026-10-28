@@ -40,6 +40,7 @@ def reduced_PG(
     xspec_model = xspec.Model("tbabs(simplcutx(ezdiskbb))")
     xspec_model.setPars(list(np.concat([params[:3], [0.0, 100.0], params[3:]])) )
     xspec.AllData.ignore("**-0.3 10.0-**")
+    xspec.AllData.ignore("bad")
 
     value = xspec.Fit.statistic / xspec.Fit.dof
 

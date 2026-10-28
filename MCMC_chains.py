@@ -1,4 +1,7 @@
 # Imports
+import sys
+sys.path.insert(0, "./")
+
 import xspec
 import matplotlib.pyplot as plt
 import numpy as np
@@ -6,6 +9,7 @@ from astropy.io import fits
 import os
 import pickle
 import time
+import re
 
 from fspnet.utils.utils import open_config
 
@@ -13,13 +17,17 @@ from utils.misc_utils import ROOT
 
 def run_MCMC_chains():
     # load spectra names, object names and targets
-    with open(os.path.join(ROOT,'FSPNet/predictions/supervised_4/specific_1_test_1_synth.pickle'), 'rb') as file:
+    with open(os.path.join(ROOT,'predictions/supervised_4/specific_1_test_1_synth.pickle'), 'rb') as file:
         pickle_data = pickle.load(file)
 
-    _, config = open_config('spectrum-fit',ROOT+'/FSPNet/config.yaml')
+    _, config = open_config('spectrum-fit',os.path.join(ROOT,'config.yaml'))
 
     model_name = config['model']['custom-model-name']
     model_dir = config['model']['model-directory']
+
+    _, config_lim =  open_config('synthesize-spectra',os.path.join(ROOT,'config.yaml'))
+
+    param_lims = config_lim['model']['parameter-limits']
 
     spectra = pickle_data['ids']
     object_names = pickle_data['object']
@@ -28,10 +36,12 @@ def run_MCMC_chains():
     print('ROOT:', ROOT)
 
     # loads simplcutx to be used
-    # xspec.AllModels.lmod(model_name, model_dir)
-    xspec.AllModels.tclLoad(ROOT+'/Xspec_models/simplcutx/libjscutx.dylib')
+    try:
+        xspec.AllModels.lmod(model_name, model_dir)
+    except  Exception as e:
+        xspec.AllModels.tclLoad(os.path.join(ROOT,'../Xspec_models/simplcutx/libjscutx.dylib'))
 
-    data_dir=os.path.join(ROOT,'FSPNet/data/spectra/')
+    data_dir=os.path.join(ROOT,'data/spectra/')
 
     # to put all data in one file
     all_dists = []
@@ -45,7 +55,7 @@ def run_MCMC_chains():
         # Load the spectrum information
         with fits.open(data_dir + spectrum) as file:
             spectrum_info = file[1].header
-        det_num = int(spectrum_info['RESPFILE'][7:9])
+        det_num = int(re.search(r'_d(\d+)', spectrum_info['RESPFILE']).group(1))
 
         # create settings for fakeit based on the spectrum we use
         fake_base = xspec.FakeitSettings(

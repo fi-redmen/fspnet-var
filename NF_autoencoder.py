@@ -38,6 +38,7 @@ class GaussianNLLLoss(loss_funcs.BaseLoss):
             Optional keyword arguments to be passed to GaussianNLLLoss
         """
         super().__init__(nn.GaussianNLLLoss, *args, **kwargs)
+        self._name="GaussianNLLLoss"
 
     def __setstate__(self, state: dict[str, Any]) -> None:
         super().__setstate__(state)
