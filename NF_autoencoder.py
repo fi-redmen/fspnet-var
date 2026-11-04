@@ -611,8 +611,8 @@ class NFdecoder(archs.Decoder):
 
             if self._verbose in ('full', 'epoch'):
                 print(f'Epoch [{self._epoch}/{epochs}]\t'
-                    f'Training loss: {self.losses[0][-1]:.3e}\t'
-                    f'Validation loss: {self.losses[1][-1]:.3e}\t'
+                    f'Training loss: {self.losses[0][-1]['total']:.3e}\t'
+                    f'Validation loss: {self.losses[1][-1]['total']:.3e}\t'
                     f'Time: {time() - t_initial:.1f}')
             elif self._verbose == 'progress':
                 progress_bar(
