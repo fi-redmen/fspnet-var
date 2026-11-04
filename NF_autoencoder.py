@@ -555,6 +555,29 @@ class NFdecoder(archs.Decoder):
         self.loss_func = state['loss_func']
         self._start_epoch = state['start_epoch']
 
+    def _loss_tensor(self, in_data: TensorListLike, target: TensorListLike, _: Any) -> dict[str, Tensor]:
+        """
+        Calculates the loss from the autoencoder's predictions.
+
+        Parameters
+        ----------
+        in_data : TensorListLike
+            Input high dimensional data of shape (N, ...) and type float, where N is the batch size
+        target : TensorListLike
+            Latent target low dimensional data of shape (N, ...) and type float
+
+        Returns
+        -------
+        dict[str, Tensor]
+            Loss function terms from the autoencoder's predictions
+        """
+        loss: dict[str, Tensor] = {}
+        output: Tensor = self.net(in_data[:,0,:])
+
+        loss['reconstruct'] = self.loss_func(output, target)
+
+        return loss
+
     def training(self, epochs: int, loaders: tuple[DataLoader, DataLoader]) -> None:
         """
         Trains & validates the network for each epoch

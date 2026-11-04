@@ -285,7 +285,7 @@ def NF_train(cycle_num: int | None = 0,
     '''---------- DECODER TRAINING ----------'''
     # train decoder on synthetic
     print('training decoder...')
-    # decoder.training(n_epochs, d_loaders)
+    decoder.training(n_epochs, d_loaders)
     print('decoder trained!')
 
     '''---------- ENCODER TRAINING SYNTHETIC ----------'''
