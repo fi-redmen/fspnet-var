@@ -640,4 +640,4 @@ class NFdecoder(archs.Decoder):
         self.train(False)
         final_loss = self._train_val(loaders[1])
         self._start_epoch = self._epoch
-        print(f'\nFinal validation loss: {final_loss:.3e}')
+        print(f'\nFinal validation loss: {final_loss['total']:.3e}')
