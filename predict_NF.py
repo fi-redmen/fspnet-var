@@ -5,8 +5,8 @@ import numpy as np
 from fspnet.utils.utils import open_config
 from torch.utils.data import DataLoader, Subset
 
-from fspnetvar.train_NF import init
-from fspnetvar.utils.misc_utils import ROOT
+from train_NF import init
+from utils.misc_utils import ROOT
 
 
 def NF_predict(load_name, dec_load_name, names, object_names,

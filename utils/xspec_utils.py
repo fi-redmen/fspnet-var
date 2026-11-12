@@ -7,13 +7,11 @@ import os
 import re
 import pickle
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-PARAM_LIMS: ndarray = np.array([[5.0e-3,75],[1.3,4],[1.0e-3,1],[2.5e-2, 4],[1.0e-2, 1.0e+10]])
+from utils.misc_utils import ROOT
 
 def reduced_PG(
     params,
     spec_name,
-    param_limits: ndarray = PARAM_LIMS,
     data_dir = ROOT+'/data/spectra/'
     ):
 
@@ -42,6 +40,7 @@ def reduced_PG(
     xspec_model = xspec.Model("tbabs(simplcutx(ezdiskbb))")
     xspec_model.setPars(list(np.concat([params[:3], [0.0, 100.0], params[3:]])) )
     xspec.AllData.ignore("**-0.3 10.0-**")
+    xspec.AllData.ignore("bad")
 
     value = xspec.Fit.statistic / xspec.Fit.dof
 

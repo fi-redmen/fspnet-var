@@ -38,13 +38,14 @@ class GaussianNLLLoss(loss_funcs.BaseLoss):
             Optional keyword arguments to be passed to GaussianNLLLoss
         """
         super().__init__(nn.GaussianNLLLoss, *args, **kwargs)
+        self._name="GaussianNLLLoss"
 
     def __setstate__(self, state: dict[str, Any]) -> None:
         super().__setstate__(state)
         self._loss_func = nn.GaussianNLLLoss(*self._args, **self._kwargs)
 
     def forward(self, output: Tensor, target: Tensor) -> Tensor:
-        return self._loss_func(output, target[:, 0], target[:, 1] ** 2)
+        return self._loss_func(output[:,0,:], target[:, 0], target[:, 1] ** 2)
 
 
 class MSELoss(loss_funcs.MSELoss):
@@ -201,7 +202,10 @@ class NFautoencoder(archs.Autoencoder):
             loss['reconstruct'] = self.reconstruct_func(output, in_data)
 
         if self.get_loss_weights('latent') and latent is not None:
-            loss['latent'] = self.latent_func(latent, target)
+            if self.latent_func._name == 'MSELoss':
+                loss['latent'] = self.latent_func(latent, target[:,0,:])    
+            else:
+                loss['latent'] = self.latent_func(torch.unsqueeze(latent, 1), target) 
 
         if self.get_loss_weights('bound') and latent is not None:
             loss['bound'] = torch.mean(torch.cat((
@@ -210,7 +214,7 @@ class NFautoencoder(archs.Autoencoder):
             )))
 
         if self.get_loss_weights('flow'):
-            loss['flow'] = -1 * self.net.checkpoints[-2].log_prob(target).mean()
+            loss['flow'] = -1 * self.net.checkpoints[-2].log_prob(target[:,0,:]).mean()
 
         if self.get_loss_weights('kl'):
             loss['kl'] = self.net.kl_loss
@@ -383,7 +387,7 @@ class NFautoencoder(archs.Autoencoder):
             for i, (_, low_dim, high_dim, *extra) in enumerate(loader):
                 t_initial = time()
                 in_data, target = cast(
-                    tuple[TensorListLike, TensorListLike],
+                    tuple[TensorListLike, TensorListLike, TensorListLike],
                     self._data_loader_translation(
                         data_collation(low_dim, data_field=False).to(self._device),
                         data_collation(high_dim, data_field=False).to(self._device),
@@ -551,6 +555,29 @@ class NFdecoder(archs.Decoder):
         self.loss_func = state['loss_func']
         self._start_epoch = state['start_epoch']
 
+    def _loss_tensor(self, in_data: TensorListLike, target: TensorListLike, _: Any) -> dict[str, Tensor]:
+        """
+        Calculates the loss from the autoencoder's predictions.
+
+        Parameters
+        ----------
+        in_data : TensorListLike
+            Input high dimensional data of shape (N, ...) and type float, where N is the batch size
+        target : TensorListLike
+            Latent target low dimensional data of shape (N, ...) and type float
+
+        Returns
+        -------
+        dict[str, Tensor]
+            Loss function terms from the autoencoder's predictions
+        """
+        loss: dict[str, Tensor] = {}
+        output: Tensor = self.net(in_data[:,0,:])
+
+        loss['reconstruct'] = self.loss_func(output, target)
+
+        return loss
+
     def training(self, epochs: int, loaders: tuple[DataLoader, DataLoader]) -> None:
         """
         Trains & validates the network for each epoch
@@ -584,8 +611,8 @@ class NFdecoder(archs.Decoder):
 
             if self._verbose in ('full', 'epoch'):
                 print(f'Epoch [{self._epoch}/{epochs}]\t'
-                    f'Training loss: {self.losses[0][-1]:.3e}\t'
-                    f'Validation loss: {self.losses[1][-1]:.3e}\t'
+                    f'Training loss: {self.losses[0][-1]['total']:.3e}\t'
+                    f'Validation loss: {self.losses[1][-1]['total']:.3e}\t'
                     f'Time: {time() - t_initial:.1f}')
             elif self._verbose == 'progress':
                 progress_bar(
@@ -613,4 +640,4 @@ class NFdecoder(archs.Decoder):
         self.train(False)
         final_loss = self._train_val(loaders[1])
         self._start_epoch = self._epoch
-        print(f'\nFinal validation loss: {final_loss:.3e}')
+        print(f'\nFinal validation loss: {final_loss['total']:.3e}')

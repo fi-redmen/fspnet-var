@@ -67,7 +67,7 @@ spectrum-fit:
     encoder-save: 7
     decoder-load: 42
     encoder-load: 7
-    epochs: 2
+    epochs: 3
     # Number of inputs to process between network weight updates
     batch-size: 60
     # Number of threads to use for multiprocessing, 0 will use all available,

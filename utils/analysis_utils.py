@@ -7,7 +7,7 @@ from numpy import ndarray
 from fspnet.utils.utils import open_config
 from fspnet.utils.multiprocessing import check_cpus, mpi_multiprocessing
 
-from fspnetvar.utils.misc_utils import ROOT
+from utils.misc_utils import ROOT
 
 def pyxspec_test(
         worker_dir: str,
@@ -105,7 +105,7 @@ def pyxspec_tests(
     worker_dir: str = config['output']['worker-directory']
     default_params: list[float] = config['model']['default-parameters']
     worker_data: dict[str, Any] = {
-        'optimize': True,
+        'optimize': False,
         'dirs': [
             ROOT,
             config['data']['spectra-directory'],
@@ -155,10 +155,10 @@ def pyxspec_tests(
     #     python_path=python,
     # )
 
-    # Allow Xspec optimization
-    worker_data['optimize'] = True
-    with open(f'{worker_dir}worker_data.pickle', 'wb') as file:
-        pickle.dump(worker_data, file)
+    # # Allow Xspec optimization
+    # worker_data['optimize'] = True
+    # with open(f'{worker_dir}worker_data.pickle', 'wb') as file:
+    #     pickle.dump(worker_data, file)
 
     # Encoder + Xspec performance
     # print('\nTesting Encoder + Fitting...')
