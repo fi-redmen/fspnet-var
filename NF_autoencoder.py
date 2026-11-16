@@ -626,16 +626,17 @@ class NFdecoder(archs.Decoder):
 
             # End plateaued networks early
             avg_over = 10
-            patience_factor=2
+            patience_factor = 2
             if (self._epoch > self._start_epoch + self.scheduler.patience*patience_factor + avg_over):
-                threshold_loss = np.array(self.losses[0][-avg_over:])+0.2*abs(np.array(self.losses[0][-avg_over:]))
-                current_loss = np.array(self.losses[1][-avg_over:])
-                if all(current_loss > threshold_loss):
-                    print('threshold loss:', threshold_loss)
-                    print('current_loss:', current_loss)
+                threshold_losses = [np.array([self.losses[0][-i][key]+0.2*abs(np.array(self.losses[0][-i][key]))
+                                             for i in range(1,avg_over+1)])
+                                             for key in self.losses[0][0].keys() if key!='total']
+                current_losses = [np.array([self.losses[1][-i][key]
+                                            for i in range(1,avg_over+1)])
+                                            for key in self.losses[1][0].keys() if key!='total']
+                if all(np.all(c > t) for c, t, in zip(current_losses, threshold_losses)):
                     print('Trial plateaued, ending early...')
                     break
-
 
         self.train(False)
         final_loss = self._train_val(loaders[1])
