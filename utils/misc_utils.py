@@ -2,16 +2,19 @@ import numpy as np
 from numpy import ndarray
 import xspec
 import os
+from typing import Any
+
+from fspnet.utils.utils import open_config
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-PARAM_LIMS: ndarray = np.array([[5.0e-3,75],[1.3,4],[1.0e-3,1],[2.5e-2, 4],[1.0e-2, 1.0e+10]])
+SYNTHETIC_DIR: str = ROOT+'/data/synth_spectra_clean.pickle'
 
 def sample(
     data: dict,
-    param_limits: ndarray = PARAM_LIMS,
     num_specs = 1,
     num_samples = 1,
-    spec_scroll=0
+    spec_scroll=0,
+    config: str | dict[str, Any] = './config.yaml',
     ):
     '''
     Samples from given distribution (made up of many samples)
@@ -29,6 +32,11 @@ def sample(
         Samples accross spectra, number of samples we want for that spectrum, and the number of parameter distributions we are sampling from
         - Shape: spectrum number, sample number, parameter number
     '''
+
+    if isinstance(config, str):
+        _, config = open_config('synthesize-spectra', os.path.join(ROOT, config))
+
+    param_limits = np.array([list(lim.values()) for lim in config['model']['parameter-limits']])
 
     all_samples = []
     for spec_num in range(spec_scroll,num_specs+spec_scroll):
@@ -50,50 +58,6 @@ def sample(
         all_samples.append(samples)
 
     return all_samples
-
-def reduced_PG(
-    params,
-    spec_name,
-    param_limits: ndarray = PARAM_LIMS,
-    data_dir = '/Users/work/Projects/FSPNet/data/spectra/'
-    ):
-
-    # params = [2.0, 2.5, 2.0e-2, 1.0, 1.0]  # Example parameters for the model
-
-    os.chdir(data_dir)
-
-    # with fits.open(spec_name) as file:
-    #     spectrum_info = file[1].header
-
-    xspec.Xset.chatter = 0
-    xspec.Xset.logChatter = 0
-
-    # Load spectrum and model
-    xspec.Spectrum(spec_name)
-    try:
-        xspec.AllModels.lmod('simplcutx', dirPath='/Users/work/Projects/FSPNet/simplcutx/')
-    except Exception as e:
-        xspec.AllModels.tclLoad('/Users/work/Projects/FSPNet/simplcutx/libjscutx.dylib')
-
-    # settings for xspec
-    xspec.AllModels.setEnergies("0.003  300. 1000 log")
-    xspec.Plot.xAxis="keV"
-    xspec.Plot.background = True
-    xspec.AllModels.systematic = 0.
-    xspec.Fit.statMethod = 'pgstat'
-    xspec.Xset.abund = "wilm"
-
-    # make reconstruction from model
-    xspec_model = xspec.Model("tbabs(simplcutx(ezdiskbb))")
-    xspec_model.setPars(list(np.concat([params[:3], [0.0, 100.0], params[3:]])) )
-    xspec.AllData.ignore("**-0.3 10.0-**")
-
-    value = xspec.Fit.statistic / xspec.Fit.dof
-
-    xspec.AllData.clear()
-    xspec.AllModels.clear()
-
-    return value
 
 def get_energy_widths(
 

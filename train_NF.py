@@ -1,7 +1,3 @@
-# from NFautoencoder import NFautoencoder, net_init, GaussianNLLLoss, MSELoss
-# import pandas as pd
-# from netloader_tests import TestConfig, gen_indexes, mod_network
-# from networkx import config
 import sys
 sys.path.insert(0, "./")
 
@@ -16,12 +12,12 @@ from netloader import transforms
 from netloader.network import Network
 from netloader.data import loader_init
 from netloader.utils import save_name, get_device
-from fspnet.utils.data import SpectrumDataset
+from data import SpectrumDataset
 from fspnet.utils.utils import open_config
 from torch.utils.data import DataLoader
 
-from fspnetvar.utils.misc_utils import ROOT
-from fspnetvar.NF_autoencoder import (
+from utils.misc_utils import ROOT
+from NF_autoencoder import (
     NFautoencoder,
     NFautoencoderNetwork,
     NFdecoder,
@@ -101,7 +97,7 @@ def net_init(
         decoder = Network(
             decoder_name,
             networks_dir,
-            list(datasets[1][0][1].shape),
+            list(datasets[1][0][1][0].shape),
             list(datasets[1][0][2].shape),
         )
         decoder = NFdecoder(
@@ -128,7 +124,7 @@ def net_init(
             encoder_name,
             networks_dir,
             list(datasets[0][0][2].shape),
-            list(datasets[0][0][1].shape),
+            list(datasets[0][0][1][0].shape),
         )
 
         # to train autoencoder_NF
@@ -161,7 +157,6 @@ def net_init(
 
         #Loss function settings for autoencoder
         net.reconstruct_func = GaussianNLLLoss() #  gaussian_loss   #
-        net.latent_func = MSELoss()   # mse_loss    #
 
         net.set_loss_weights(
             bound=0,
@@ -306,6 +301,9 @@ def NF_train(cycle_num: int | None = 0,
     '''---------- ENCODER TRANSFER LEARNING ----------'''
     # change load and save names for transfer learning
     net.set_save_path(net.get_save_path().replace('.pth', '_real.pth'), overwrite=True)
+
+    # change loss function to gaussian NNL
+    net.latent_func = GaussianNLLLoss()
 
     # resetting autoencoder optimiser
     if net.get_epochs() == n_epochs:
