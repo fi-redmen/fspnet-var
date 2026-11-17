@@ -468,7 +468,7 @@ class NFautoencoder(archs.Autoencoder):
             avg_over = 10
             patience_factor = 2
             if (self._epoch > self._start_epoch + self.scheduler.patience*patience_factor + avg_over):
-                threshold_losses = [np.array([self.losses[0][-i][key]+0.2*abs(np.array(self.losses[0][-i][key]))
+                threshold_losses = [np.array([self.losses[0][-i][key]+0.1*abs(np.array(self.losses[0][-i][key]))
                                              for i in range(1,avg_over+1)])
                                              for key in self.losses[0][0].keys() if key!='total']
                 current_losses = [np.array([self.losses[1][-i][key]
@@ -601,7 +601,7 @@ class NFdecoder(archs.Decoder):
             avg_over = 10
             patience_factor=2
             if (self._epoch > self._start_epoch + self.scheduler.patience*patience_factor + avg_over):
-                threshold_loss = np.array(self.losses[0][-avg_over:])+0.2*abs(np.array(self.losses[0][-avg_over:]))
+                threshold_loss = np.array(self.losses[0][-avg_over:])+0.1*abs(np.array(self.losses[0][-avg_over:]))
                 current_loss = np.array(self.losses[1][-avg_over:])
                 if all(current_loss > threshold_loss):
                     print('threshold loss:', threshold_loss)

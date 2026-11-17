@@ -2,6 +2,8 @@
 # import pandas as pd
 # from netloader_tests import TestConfig, gen_indexes, mod_network
 # from networkx import config
+import sys
+sys.path.insert(0, "./")
 
 import os
 from typing import Any
@@ -278,8 +280,8 @@ def NF_train(cycle_num: int | None = 0,
         root_encoder_name = str(config['training']['encoder-save'])
 
     # load and save names for synthetic training
-    # config['training']['encoder-load'] = 0
-    # config['training']['decoder-load'] = 0
+    config['training']['encoder-load'] = 0
+    config['training']['decoder-load'] = 0
     config['training']['encoder-save'] = root_encoder_name + '_synth'
     config['training']['decoder-save'] = str(1) + str(cycle_num)
     #initialise data loaders and networks for synthetic training
@@ -288,7 +290,7 @@ def NF_train(cycle_num: int | None = 0,
     '''---------- DECODER TRAINING ----------'''
     # train decoder on synthetic
     print('training decoder...')
-    # decoder.training(n_epochs, d_loaders)
+    decoder.training(n_epochs, d_loaders)
     print('decoder trained!')
 
     '''---------- ENCODER TRAINING SYNTHETIC ----------'''
