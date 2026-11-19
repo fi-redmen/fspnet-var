@@ -1,5 +1,5 @@
 import sys
-sys.path.insert(0, "./")
+sys.path.append(".")
 
 import os
 from typing import Any
@@ -157,6 +157,7 @@ def net_init(
 
         #Loss function settings for autoencoder
         net.reconstruct_func = GaussianNLLLoss() #  gaussian_loss   #
+        net.latent_func = MSELoss() # gaussian_loss  #
 
         net.set_loss_weights(
             bound=0,
@@ -285,7 +286,7 @@ def NF_train(cycle_num: int | None = 0,
     '''---------- DECODER TRAINING ----------'''
     # train decoder on synthetic
     print('training decoder...')
-    decoder.training(n_epochs, d_loaders)
+    # decoder.training(n_epochs, d_loaders)
     print('decoder trained!')
 
     '''---------- ENCODER TRAINING SYNTHETIC ----------'''

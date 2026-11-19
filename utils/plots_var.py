@@ -6,7 +6,7 @@ import pickle
 import random
 import numpy as np
 from numpy import ndarray
-from scipy.stats import pearsonr
+from scipy.stats import pearsonr, mode
 from scipy.optimize import curve_fit
 
 import matplotlib.pyplot as plt
@@ -250,7 +250,9 @@ def comparison_plot(
     multi_targs = data['targets'].swapaxes(1,2).swapaxes(0,1)
     multi_lats = data['latent'].swapaxes(1,2).swapaxes(0,1)
     num_dist_specs_an = 250 # number of spectra to use for PCC etc.
-    idxs_arr = [random.sample(range(len(multi_lats[0,:num_dist_specs_an,:].flatten())), 50) for i in range(100)] # allow the same idxs to be used for each parameter
+    num_bootstrap_samples = 100 # number of bootstrap samples to take for fit line
+    num_dist_samples = 50 # number of points to sample from each distribution for fit line
+    idxs_arr = [random.sample(range(len(multi_lats[0,:num_dist_specs_an,:].flatten())), num_dist_samples) for i in range(num_bootstrap_samples)] # indexes for each parameter distribution
     for i, (targ, lat, axis, grey_targ) in enumerate(zip(multi_targs, multi_lats, axes.values(), grey_targs)):
         # targ[spectrum number][0=value, 1=error]
         # clear axis from single samples
@@ -269,20 +271,38 @@ def comparison_plot(
 
         axis.plot([np.min(grey_targ), np.max(grey_targ)], [np.min(grey_targ), np.max(grey_targ)], color='k', alpha=0.5, linestyle='--')
 
+        mode_counts = []
+
         for spec_num in range(0,num_dist_specs):
             if list(colour_map):
                 Norm = pltcolors.LogNorm(vmin=np.min(colour_map), vmax=np.max(colour_map)) if log_colour_map else pltcolors.Normalize(vmin=np.min(colour_map), vmax=np.max(colour_map))
-                axis.scatter(x=[targ[spec_num][0]]*n_points, y=lat[spec_num][:n_points], linestyle='None', c=[colour_map[spec_num]]*n_points, alpha=0.1, s=15, cmap=plt.cm.colors.ListedColormap(new_cmap), norm=Norm)
+                axis.errorbar(x=[targ[spec_num][0]], y=mode(lat[spec_num]).mode, 
+                              yerr=[[np.quantile(lat[spec_num], 0.16)], [np.quantile(lat[spec_num], 0.84)]], 
+                              linestyle='None', alpha=0.1, markersize=15, c='k')
+                mode_counts.append(mode(lat[spec_num]).count)
+                axis.scatter(x=[targ[spec_num][0]], y=mode(lat[spec_num]).mode, linestyle='None', c=[colour_map[spec_num]], alpha=1, s=15, cmap=plt.cm.colors.ListedColormap(new_cmap), norm=Norm)
+                
             else:
-                axis.scatter(x=[targ[spec_num][0]]*n_points, y=lat[spec_num][:n_points], linestyle='None', color='grey', alpha=0.05, s=10)
+                # axis.scatter(x=[targ[spec_num][0]]*n_points, y=lat[spec_num][:n_points], linestyle='None', color='grey', alpha=0.05, s=10)
+                axis.errorbar(x=[targ[spec_num][0]], y=mode(lat[spec_num]).mode, 
+                              yerr=[[np.quantile(lat[spec_num], 0.16)], [np.quantile(lat[spec_num], 0.84)]], 
+                              linestyle='None', c='grey', alpha=0.05, markersize=10)
         
-        n_points_an = 100
-        x_PCC_data = np.repeat(targ[:num_dist_specs_an,0], n_points_an, axis=0).flatten()
-        y_PCC_data = lat[:num_dist_specs_an,:n_points_an].flatten()
+        # n_points_an = 100
+        # x_PCC_data = np.repeat(targ[:num_dist_specs_an,0], n_points_an, axis=0).flatten()
+        # y_PCC_data = lat[:num_dist_specs_an,:n_points_an].flatten()
+        x_PCC_data = targ[:num_dist_specs_an,0]
+        y_PCC_data = np.array([mode(lat[:num_dist_specs_an][j]).mode for j in range(num_dist_specs_an)])
+        
+        # remove pegged values
+        keep = np.where((x_PCC_data != np.min(x_PCC_data)) & (x_PCC_data != np.max(x_PCC_data)))[0]
+        x_PCC_data = x_PCC_data[keep]
+        y_PCC_data = y_PCC_data[keep]
+
         x_PCC_data = np.log10(x_PCC_data) if i in log_params else x_PCC_data
         y_PCC_data = np.log10(y_PCC_data) if i in log_params else y_PCC_data
-        # x_PCC_data = x_PCC_data
-        # y_PCC_data = y_PCC_data
+        x_PCC_data = x_PCC_data
+        y_PCC_data = y_PCC_data
         corr_coef = pearsonr(x_PCC_data, y_PCC_data)[0]
 
         # cs = []
@@ -301,6 +321,11 @@ def comparison_plot(
             y_data = np.log10(y) if i in log_params else y
             # x_data = x
             # y_data = y
+
+            # remove pegged values
+            keep = np.where((x_data != np.min(x_data)) & (x_data != np.max(x_data)))[0]
+            x_data = x_data[keep]
+            y_data = y_data[keep]
 
             # using just gradient m and assuming intercept = 0
             bp, cov = curve_fit(line, x_data, y_data)
@@ -325,13 +350,15 @@ def comparison_plot(
         one_sig_low = np.mean(fit_lines, axis=1) - std
         one_sig_upp = np.mean(fit_lines, axis=1) + std
 
-        m_final = np.mean(ms)
-        m_err_final = np.std(ms)
+        m_final = np.median(ms)
+        m_err_up = np.quantile(ms, 0.84) - m_final
+        m_err_down = m_final - np.quantile(ms, 0.16)
+
         # c_final = np.mean(cs)
         # c_err_final = np.std(cs)
 
         axis.fill_between(x_fit, one_sig_low, one_sig_upp, color='#2765f5', alpha=0.2, label='1$\sigma$')
-        axis.text(-0.13, -0.42, f"PCC: ${corr_coef:.3f}$\n$y=({m_final:.3f}\pm{m_err_final:.3f})x$", transform=axis.transAxes, fontsize=PCC)
+        axis.text(-0.13, -0.42, f"PCC: ${corr_coef:.3f}$\n$y=({m_final:.3f}+{m_err_up:.3f}/-{m_err_down:.3f})x$", transform=axis.transAxes, fontsize=PCC)
         # if c_final >= 0:
         #     axis.text(-0.13, -0.42, rf"PCC: ${corr_coef:.3f}$"+"\n"+rf"$y=({m_final:.3f}\pm{m_err_final:.2f})x + ({c_final:.3f}\pm{c_err_final:.2f})$", transform=axis.transAxes, fontsize=PCC)
         # else:

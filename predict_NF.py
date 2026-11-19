@@ -1,3 +1,5 @@
+import sys
+sys.path.append(".")
 import os
 import pickle
 
@@ -77,13 +79,13 @@ def NF_predict(load_name, dec_load_name, names, object_names,
                 pred_data[key] = np.stack(transform(pred_data[key][:,0], back=True,
                                                 uncertainty=pred_data[key][:,1]), axis=1)
             elif key == 'targets':
-                idxs = []
-                for pred_id in pred_data['ids']:
-                    for j, name in enumerate(dataset.names):
-                        if pred_id==name:
-                            idxs.append(j)
-                pred_data[key] = np.stack(transform(pred_data[key], back=True,
-                                            uncertainty=dataset.param_uncertainty[idxs].numpy()), axis=1)
+                # idxs = []
+                # for pred_id in pred_data['ids']:
+                #     for j, name in enumerate(dataset.names):
+                #         if pred_id==name:
+                #             idxs.append(j)
+                pred_data[key] = np.stack(transform(pred_data[key][:,0], back=True,
+                                            uncertainty=pred_data[key][:,1]), axis=1)
             else:
                 pred_data[key] = transform(pred_data[key], back=True)
 
@@ -122,16 +124,16 @@ def main():
 
     numcycles=1
 
-    for i in [1]: #range(numcycles*3):
+    for i in [0]: #range(numcycles*3):
         if i < numcycles:
             load_name = '1_test_' + str(i+1)+'_synth_real'
-            dec_load_name = load_name.split('_')[0]+str(i+1)
+            dec_load_name = load_name.split('_')[0]+str(i)
         elif i < numcycles*2:
             load_name ='1_test_' + str(i-numcycles+1)+'_real'
-            dec_load_name = load_name.split('_')[0]+str(i-numcycles+1)
+            dec_load_name = load_name.split('_')[0]+str(i-numcycles)
         else:
             load_name =  '1_test_' + str(i-2*numcycles+1)+'_synth'
-            dec_load_name = load_name.split('_')[0]+str(i-2*numcycles+1)
+            dec_load_name = load_name.split('_')[0]+str(i-2*numcycles)
 
         print('predicting for load_name: ', load_name, '...')
         NF_predict(

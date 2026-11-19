@@ -16,16 +16,16 @@ global-variable :
     # can also contain parameters (params) for supervised learning and
     # spectra names (names) if fitted parameters are provided for specific files in
     # spectra_directory and tests in spectrum-fit is True
-    - &spectra_data_path '../data/spectra.pickle'
+    - &spectra_data_path './data/spectra.pickle'
     # Path to synthetic spectra with noise with the same format as spectra_data_path
     #  &synthetic_data_path '../data/synth_spectra.pickle'
-    - &synthetic_data_path '../data/synth_spectra_bias.pickle'
+    - &synthetic_data_path './data/synth_spectra_bias.pickle'
     # Path to synthetic spectra without noise with the same format as spectra_data_path
     # - &clean_synthetic_data_path '../data/synth_spectra_clean.pickle'
-    - &clean_synthetic_data_path '../data/synth_spectra_clean.pickle'
+    - &clean_synthetic_data_path './data/synth_spectra_clean.pickle'
     # - &andrea_spectra_path './data/andrea_spectra.pkl'
     # Path to the directory containing spectra fits files
-    - &spectra_data_directory '../data/spectra/'
+    - &spectra_data_directory './data/spectra/'
   model-variables:
     # Number of free parameters
     # - &parameter_number 7

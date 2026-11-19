@@ -102,28 +102,33 @@ def analysis_NF(config: str = './config.yaml',
     if not os.path.exists(plots_directory):
         os.makedirs(plots_directory)
 
+    # make decoder losses dictionary
+    decoder_losses_train = {}
+    decoder_losses_train['total'] = [decoder.losses[0][i]['total'] for i in range(len(decoder.losses[0]))]
+    decoder_losses_val = {}
+    decoder_losses_val['total'] = [decoder.losses[1][i]['total'] for i in range(len(decoder.losses[1]))]
     # plot decoder performance
-    # plots.plot_performance(
-    #     'Loss',
-    #     decoder.losses[1][1:],
-    #     plots_dir= plots_directory,
-    #     train=decoder.losses[0][1:],
-    #     save_name='dec_performance')
+    plots_var.performance_plot(
+        'Loss',
+        {key: value for key, value in decoder_losses_train.items()},
+        {key: value for key, value in decoder_losses_val.items()},
+        plots_dir= plots_directory,
+        save_name='dec_performance')
 
     # make separete losses dictionary
-    # separate_losses_train = {}
-    # if 'reconstruct' in net.losses[0][0].keys():
-    #     separate_losses_train['reconstruct'] = [net.losses[0][i]['reconstruct'] for i in range(len(net.losses[0]))]
-    # if 'flow' in net.losses[0][0].keys():
-    #     separate_losses_train['flow'] = [net.losses[0][i]['flow'] for i in range(len(net.losses[0]))]
-    # separate_losses_train['total'] = [net.losses[0][i]['total'] for i in range(len(net.losses[0]))]
+    separate_losses_train = {}
+    if 'reconstruct' in net.losses[0][0].keys():
+        separate_losses_train['reconstruct'] = [net.losses[0][i]['reconstruct'] for i in range(len(net.losses[0]))]
+    if 'flow' in net.losses[0][0].keys():
+        separate_losses_train['flow'] = [net.losses[0][i]['flow'] for i in range(len(net.losses[0]))]
+    separate_losses_train['total'] = [net.losses[0][i]['total'] for i in range(len(net.losses[0]))]
 
-    # separate_losses_val = {}
-    # if 'reconstruct' in net.losses[1][0].keys():
-    #     separate_losses_val['reconstruct'] = [net.losses[1][i]['reconstruct'] for i in range(len(net.losses[1]))]
-    # if 'flow' in net.losses[1][0].keys():
-    #     separate_losses_val['flow'] = [net.losses[1][i]['flow'] for i in range(len(net.losses[1]))]
-    # separate_losses_val['total'] = [net.losses[1][i]['total'] for i in range(len(net.losses[1]))]
+    separate_losses_val = {}
+    if 'reconstruct' in net.losses[1][0].keys():
+        separate_losses_val['reconstruct'] = [net.losses[1][i]['reconstruct'] for i in range(len(net.losses[1]))]
+    if 'flow' in net.losses[1][0].keys():
+        separate_losses_val['flow'] = [net.losses[1][i]['flow'] for i in range(len(net.losses[1]))]
+    separate_losses_val['total'] = [net.losses[1][i]['total'] for i in range(len(net.losses[1]))]
 
     # plot autoencoder performance - remember to change part of net_init to correspond to encoder only vs autoencoder
     # plots.plot_performance(
@@ -134,12 +139,12 @@ def analysis_NF(config: str = './config.yaml',
     #     save_name='net_perfomance.png')
 
     # separate losses performance plot
-    # plots_var.performance_plot(
-    #     'Loss',
-    #     {key: value for key, value in separate_losses_train.items()},
-    #     {key: value for key, value in separate_losses_val.items()},
-    #     plots_dir=plots_directory,
-    #     save_name='net_performance_sep.png')
+    plots_var.performance_plot(
+        'Loss',
+        {key: value for key, value in separate_losses_train.items()},
+        {key: value for key, value in separate_losses_val.items()},
+        plots_dir=plots_directory,
+        save_name='net_performance_sep.png')
 
     # '''---------- LOADING DATA ----------'''
 
@@ -272,33 +277,33 @@ def analysis_NF(config: str = './config.yaml',
     #     save_name = 'Param_Resids_NkT.png')
 
     '''---------- pyxspec tests ----------'''
-    os.chdir(ROOT)
-    xspec.Xset.chatter = 0
-    xspec.Xset.logChatter = 0
+    # os.chdir(ROOT)
+    # xspec.Xset.chatter = 0
+    # xspec.Xset.logChatter = 0
 
-    val_data['latent'] = val_data['latent'][:,0,:] # #np.median(val_data['latent'], axis = 1)
-    val_data['targets'] = val_data['targets'][:,0,:]
-    # val_data['ids'] = e_dataset.names[val_data['ids']]
-    pyxspec_tests(val_data, config=config)
+    # val_data['latent'] = val_data['latent'][:,0,:] # #np.median(val_data['latent'], axis = 1)
+    # val_data['targets'] = val_data['targets'][:,0,:]
+    # # val_data['ids'] = e_dataset.names[val_data['ids']]
+    # pyxspec_tests(val_data, config=config)
 
-    # print('###--- pyxspec tests results for ', load_name, '---###')
-    # print('mean:', np.mean(data_[:, -1].astype(float)))
-    # print('std:', np.std(data_[:, -1].astype(float)))
-    # print('min quantile:', np.quantile(data_[:, -1].astype(float), 0.157))
-    # print('max quantile:', np.quantile(data_[:, -1].astype(float), 0.843))
-    # print('median:', np.median(data_[:, -1].astype(float)))
-    # print('###------------------------------'+'-'*len(load_name)+'---###')
+    # # print('###--- pyxspec tests results for ', load_name, '---###')
+    # # print('mean:', np.mean(data_[:, -1].astype(float)))
+    # # print('std:', np.std(data_[:, -1].astype(float)))
+    # # print('min quantile:', np.quantile(data_[:, -1].astype(float), 0.157))
+    # # print('max quantile:', np.quantile(data_[:, -1].astype(float), 0.843))
+    # # print('median:', np.median(data_[:, -1].astype(float)))
+    # # print('###------------------------------'+'-'*len(load_name)+'---###')
 
-    # making predictions for timing purposes
-    time1000s = []
-    times1s = []
-    for i in range(5):
-        print('1000 samples:')
-        _, time1000 = net.predict(e_loaders[1], num_samples=1000, inputs=True, ret_time=True)
-        time1000s.append(time1000)
-        print('1 sample:')
-        _, time1 = net.predict(e_loaders[1], num_samples=1, inputs=True, ret_time=True)
-        times1s.append(time1)
+    # # making predictions for timing purposes
+    # time1000s = []
+    # times1s = []
+    # for i in range(5):
+    #     print('1000 samples:')
+    #     _, time1000 = net.predict(e_loaders[1], num_samples=1000, inputs=True, ret_time=True)
+    #     time1000s.append(time1000)
+    #     print('1 sample:')
+    #     _, time1 = net.predict(e_loaders[1], num_samples=1, inputs=True, ret_time=True)
+        # times1s.append(time1)
 
     # pyxspec_results = {'mean': np.mean(data_[:, -1].astype(float)),
     #                    'std': np.std(data_[:, -1].astype(float)),
@@ -317,20 +322,20 @@ def analysis_NF(config: str = './config.yaml',
 
 def main():
 
-    mode = 'supervised_5'
+    mode = 'supervised_1'
 
     numcycles=1
 
-    for i in [0,1,2]:#range(numcycles*3):
+    for i in [0]:#range(numcycles*3):
         if i < numcycles:
             load_name = '1_test_' + str(i+1)+'_synth_real'
-            dec_load_name = load_name.split('_')[0]+str(i+1)
+            dec_load_name = load_name.split('_')[0]+str(i)
         elif i < numcycles*2:
             load_name ='1_test_' + str(i-numcycles+1)+'_real'
-            dec_load_name = load_name.split('_')[0]+str(i-numcycles+1)
+            dec_load_name = load_name.split('_')[0]+str(i-numcycles)
         else:
             load_name =  '1_test_' + str(i-2*numcycles+1)+'_synth'
-            dec_load_name = load_name.split('_')[0]+str(i-2*numcycles+1)
+            dec_load_name = load_name.split('_')[0]+str(i-2*numcycles)
 
 
         print(f'analysing for load_name : {load_name}...')
